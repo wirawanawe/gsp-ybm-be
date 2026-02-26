@@ -7,8 +7,20 @@ dotenv.config();
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// CORS - izinkan localhost:3000 dan FRONTEND_URL (mis. http://192.168.18.49:3000)
+const allowedOrigins = ['http://localhost:3330'];
+if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL.trim());
+const corsOptions = {
+    origin: (origin, cb) => {
+        if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+        cb(null, false);
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -30,20 +42,26 @@ db.getConnection()
 const authRoutes = require('./routes/auth');
 const patientRoutes = require('./routes/patients');
 const roomRoutes = require('./routes/rooms');
+const ambulanceRoutes = require('./routes/ambulance');
+const userRoutes = require('./routes/users');
+const visitorRoutes = require('./routes/visitors');
+const reportRoutes = require('./routes/reports');
 // const stayRoutes = require('./routes/stays');
-// const ambulanceRoutes = require('./routes/ambulance');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/rooms', roomRoutes);
+app.use('/api/ambulance', ambulanceRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/visitors', visitorRoutes);
+app.use('/api/reports', reportRoutes);
 // app.use('/api/stays', stayRoutes);
-// app.use('/api/ambulance', ambulanceRoutes);
 
 app.get('/', (req, res) => {
     res.send('API GSP YBM is running...');
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3331;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });

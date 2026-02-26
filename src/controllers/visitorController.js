@@ -25,9 +25,16 @@ exports.getVisitors = async (req, res) => {
     }
 };
 
+const isValidNIK = (nik) => /^\d{16}$/.test(String(nik || '').trim());
+
 // POST /api/visitors
 exports.createVisitor = async (req, res) => {
     const { patient_id, name, nik, relation } = req.body;
+
+    if (!isValidNIK(nik)) {
+        return res.status(400).json({ message: 'NIK harus tepat 16 digit angka sesuai KTP' });
+    }
+
     // Handling file paths saved from Multer (assuming middleware runs before this)
     const ktp_path = req.files['ktp'] ? req.files['ktp'][0].path : null;
     const kk_path = req.files['kk'] ? req.files['kk'][0].path : null;

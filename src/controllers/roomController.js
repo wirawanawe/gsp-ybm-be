@@ -6,9 +6,24 @@ const db = require('../config/db');
 exports.getRooms = async (req, res) => {
     try {
         const [rooms] = await db.query('SELECT * FROM Rooms');
-        // Fetch beds for each room
+        // Fetch beds + pasien yang menempati (jika ada stay aktif) untuk setiap kamar
         for (let room of rooms) {
-            const [beds] = await db.query('SELECT * FROM Beds WHERE room_id = ?', [room.id]);
+            const [beds] = await db.query(
+                `SELECT 
+                    b.*,
+                    p.name AS patient_name,
+                    p.registration_number AS patient_registration_number,
+                    s.check_in_date,
+                    s.check_out_date,
+                    s.final_status
+                 FROM Beds b
+                 LEFT JOIN StayLogs s 
+                    ON s.bed_id = b.id AND s.final_status IS NULL
+                 LEFT JOIN Patients p 
+                    ON p.id = s.patient_id
+                 WHERE b.room_id = ?`,
+                [room.id]
+            );
             room.beds = beds;
         }
         res.json(rooms);
@@ -18,17 +33,108 @@ exports.getRooms = async (req, res) => {
     }
 };
 
-// POST /api/rooms
+// GET /api/rooms/:id
+exports.getRoomById = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [rooms] = await db.query('SELECT * FROM Rooms WHERE id = ?', [id]);
+        if (rooms.length === 0) {
+            return res.status(404).json({ message: 'Kamar tidak ditemukan' });
+        }
+        const room = rooms[0];
+        const [beds] = await db.query(
+            `SELECT 
+                b.*,
+                p.name AS patient_name,
+                p.registration_number AS patient_registration_number,
+                s.check_in_date,
+                s.check_out_date,
+                s.final_status
+             FROM Beds b
+             LEFT JOIN StayLogs s 
+                ON s.bed_id = b.id AND s.final_status IS NULL
+             LEFT JOIN Patients p 
+                ON p.id = s.patient_id
+             WHERE b.room_id = ?`,
+            [room.id]
+        );
+        room.beds = beds;
+        res.json(room);
+    } catch (error) {
+        console.error('getRoomById error:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan server' });
+    }
+};
+
+// POST /api/rooms — buat kamar + bed sesuai capacity agar tombol Check-in muncul di Manajemen Kamar
 exports.createRoom = async (req, res) => {
     const { room_number, floor, capacity, description } = req.body;
+    const numBeds = Math.max(1, parseInt(capacity, 10) || 1);
     try {
         const [result] = await db.query(
             'INSERT INTO Rooms (room_number, floor, capacity, description) VALUES (?, ?, ?, ?)',
-            [room_number, floor, capacity, description]
+            [room_number, floor, numBeds, description]
         );
-        res.status(201).json({ message: 'Kamar berhasil ditambahkan', id: result.insertId });
+        const roomId = result.insertId;
+        for (let i = 1; i <= numBeds; i++) {
+            await db.query(
+                'INSERT INTO Beds (room_id, bed_number, is_available) VALUES (?, ?, TRUE)',
+                [roomId, String(i)]
+            );
+        }
+        res.status(201).json({ message: 'Kamar dan bed berhasil ditambahkan', id: roomId, bedsCreated: numBeds });
     } catch (error) {
         console.error('createRoom error:', error);
+        if (error.code === 'ER_DUP_ENTRY') {
+            return res.status(400).json({ message: 'Nomor kamar sudah digunakan' });
+        }
+        res.status(500).json({ message: 'Terjadi kesalahan server' });
+    }
+};
+
+// PUT /api/rooms/:id
+exports.updateRoom = async (req, res) => {
+    const { id } = req.params;
+    const { room_number, floor, capacity, description } = req.body;
+
+    try {
+        const [rooms] = await db.query('SELECT * FROM Rooms WHERE id = ?', [id]);
+        if (rooms.length === 0) {
+            return res.status(404).json({ message: 'Kamar tidak ditemukan' });
+        }
+
+        const current = rooms[0];
+        const newRoomNumber = room_number || current.room_number;
+        const newFloor = typeof floor === 'number' ? floor : current.floor;
+        const newCapacity = typeof capacity === 'number' ? capacity : current.capacity;
+        const newDescription = description !== undefined ? description : current.description;
+
+        await db.query(
+            'UPDATE Rooms SET room_number = ?, floor = ?, capacity = ?, description = ? WHERE id = ?',
+            [newRoomNumber, newFloor, newCapacity, newDescription, id]
+        );
+
+        res.json({ message: 'Kamar berhasil diupdate' });
+    } catch (error) {
+        console.error('updateRoom error:', error);
+        if (error.code === 'ER_DUP_ENTRY') {
+            return res.status(400).json({ message: 'Nomor kamar sudah digunakan' });
+        }
+        res.status(500).json({ message: 'Terjadi kesalahan server' });
+    }
+};
+
+// DELETE /api/rooms/:id
+exports.deleteRoom = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [result] = await db.query('DELETE FROM Rooms WHERE id = ?', [id]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: 'Kamar tidak ditemukan' });
+        }
+        res.json({ message: 'Kamar berhasil dihapus' });
+    } catch (error) {
+        console.error('deleteRoom error:', error);
         res.status(500).json({ message: 'Terjadi kesalahan server' });
     }
 };
@@ -52,11 +158,58 @@ exports.createBed = async (req, res) => {
     }
 };
 
+// PUT /api/rooms/beds/:bedId
+exports.updateBed = async (req, res) => {
+    const { bedId } = req.params;
+    const { bed_number, bed_type, is_available } = req.body;
+
+    try {
+        const [beds] = await db.query('SELECT * FROM Beds WHERE id = ?', [bedId]);
+        if (beds.length === 0) {
+            return res.status(404).json({ message: 'Bed tidak ditemukan' });
+        }
+
+        const current = beds[0];
+        const newBedNumber = bed_number || current.bed_number;
+        const newBedType = bed_type !== undefined ? bed_type : current.bed_type;
+        const newIsAvailable =
+            typeof is_available === 'boolean' ? is_available : current.is_available;
+
+        await db.query(
+            'UPDATE Beds SET bed_number = ?, bed_type = ?, is_available = ? WHERE id = ?',
+            [newBedNumber, newBedType, newIsAvailable, bedId]
+        );
+
+        res.json({ message: 'Bed berhasil diupdate' });
+    } catch (error) {
+        console.error('updateBed error:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan server' });
+    }
+};
+
+// DELETE /api/rooms/beds/:bedId
+exports.deleteBed = async (req, res) => {
+    const { bedId } = req.params;
+
+    try {
+        const [result] = await db.query('DELETE FROM Beds WHERE id = ?', [bedId]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: 'Bed tidak ditemukan' });
+        }
+        res.json({ message: 'Bed berhasil dihapus' });
+    } catch (error) {
+        console.error('deleteBed error:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan server' });
+    }
+};
+
 // --- CHECK IN (STAY LOGS) ---
 
 // POST /api/rooms/check-in
+// Data penunggu sekarang diambil dari tabel Visitors (registrasi penunggu),
+// sehingga companion_name / companion_nik yang dikirim dari frontend tidak lagi dipakai di sini.
 exports.checkIn = async (req, res) => {
-    const { patient_id, bed_id, companion_name, companion_nik } = req.body;
+    const { patient_id, bed_id } = req.body;
     try {
         // Check if bed is available
         const [beds] = await db.query('SELECT is_available FROM Beds WHERE id = ?', [bed_id]);
@@ -68,9 +221,9 @@ exports.checkIn = async (req, res) => {
         await connection.beginTransaction();
 
         try {
-            // 1. Create StayLog
+            // 1. Create StayLog (final_status dibiarkan NULL sebagai tanda masih aktif)
             const [stayResult] = await connection.query(
-                'INSERT INTO StayLogs (patient_id, bed_id, check_in_date, final_status) VALUES (?, ?, CURRENT_TIMESTAMP, "Active")',
+                'INSERT INTO StayLogs (patient_id, bed_id) VALUES (?, ?)',
                 [patient_id, bed_id]
             );
             const stayId = stayResult.insertId;
@@ -81,19 +234,8 @@ exports.checkIn = async (req, res) => {
                 [bed_id]
             );
 
-            // 3. Update Patient Status
-            await connection.query(
-                'UPDATE Patients SET status_verification = "Active" WHERE id = ?',
-                [patient_id]
-            );
-
-            // 4. Create Visitor if provided
-            if (companion_name && companion_nik) {
-                await connection.query(
-                    'INSERT INTO Visitors (patient_id, name, nik) VALUES (?, ?, ?)',
-                    [patient_id, companion_name, companion_nik]
-                );
-            }
+            // 3. Tidak mengubah status_verification pasien di sini.
+            //    Status verifikasi tetap dikelola di modul Verifikasi Pasien.
 
             await connection.commit();
             res.json({ message: 'Check-in berhasil disimpan', stay_id: stayId });
@@ -117,14 +259,20 @@ exports.checkOut = async (req, res) => {
         await connection.beginTransaction();
 
         try {
-            // 1. Dapatkan StayLog Active untuk Bed ini
+            // 1. Dapatkan StayLog aktif untuk Bed ini (final_status masih NULL)
             const [activeStays] = await connection.query(
-                'SELECT * FROM StayLogs WHERE bed_id = ? AND final_status = "Active" ORDER BY id DESC LIMIT 1',
+                'SELECT * FROM StayLogs WHERE bed_id = ? AND final_status IS NULL ORDER BY id DESC LIMIT 1',
                 [bed_id]
             );
 
             if (activeStays.length === 0) {
-                return res.status(404).json({ message: 'Tidak ada pasien aktif di bed ini' });
+                // Tidak ditemukan riwayat stay aktif, tapi kita tetap boleh mengosongkan bed
+                await connection.query(
+                    'UPDATE Beds SET is_available = TRUE WHERE id = ?',
+                    [bed_id]
+                );
+                await connection.commit();
+                return res.json({ message: 'Bed dikosongkan (tanpa riwayat stay aktif)' });
             }
 
             const stay = activeStays[0];
@@ -141,15 +289,9 @@ exports.checkOut = async (req, res) => {
                 [bed_id]
             );
 
-            // 4. Update Patient Verification Status to match checkout status
+            // 4. Deactivate associated Visitors
             await connection.query(
-                'UPDATE Patients SET status_verification = ? WHERE id = ?',
-                [final_status, stay.patient_id]
-            );
-
-            // 5. Deactivate associated Visitors
-            await connection.query(
-                'UPDATE Visitors SET status = "Inactive" WHERE patient_id = ?',
+                'UPDATE Visitors SET is_active = FALSE WHERE patient_id = ?',
                 [stay.patient_id]
             );
 

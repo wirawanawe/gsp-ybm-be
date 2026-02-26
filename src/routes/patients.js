@@ -33,7 +33,17 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 router.get('/', patientController.getPatients);
+router.get('/applicants', patientController.getApplicants);
+router.get('/pending-count', patientController.getPendingCount);
+router.get('/by-nik', patientController.getPatientByNik);
 router.get('/:id/documents', patientController.getPatientDocuments);
+router.post('/:id/documents', upload.fields([
+    { name: 'ktp', maxCount: 1 },
+    { name: 'kk', maxCount: 1 },
+    { name: 'bpjs', maxCount: 1 },
+    { name: 'sktm', maxCount: 1 },
+    { name: 'rujukan', maxCount: 1 }
+]), patientController.addPatientDocuments);
 
 router.post('/register', upload.fields([
     { name: 'ktp', maxCount: 1 },
@@ -44,5 +54,12 @@ router.post('/register', upload.fields([
 ]), patientController.registerPatient);
 
 router.put('/:id/verify', patientController.verifyPatient);
+router.post('/:id/re-register', upload.fields([
+    { name: 'ktp', maxCount: 1 },
+    { name: 'kk', maxCount: 1 },
+    { name: 'bpjs', maxCount: 1 },
+    { name: 'sktm', maxCount: 1 },
+    { name: 'rujukan', maxCount: 1 }
+]), patientController.reRegister);
 
 module.exports = router;
