@@ -225,40 +225,91 @@ exports.registerPatient = async (req, res) => {
 };
 
 // POST /api/patients/:id/re-register
-// Pendaftaran ulang: pasien sudah terdaftar, set status Pending lagi. Dokumen lama tetap ada.
+// Pendaftaran ulang:
+// - Membuat baris pasien BARU dengan nomor registrasi baru
+// - Status verifikasi di-reset ke Pending
+// - Riwayat stay & status lama tetap menempel ke pasien lama
+// - Dokumen lama disalin ke pasien baru (supaya tidak perlu upload ulang)
 exports.reRegister = async (req, res) => {
-    const patientId = req.params.id;
+    const oldPatientId = req.params.id;
     const { name, dob, gender, address, phone, status_mustahik } = req.body;
+
     try {
-        const [patients] = await db.query('SELECT id FROM Patients WHERE id = ?', [patientId]);
-        if (patients.length === 0) {
-            return res.status(404).json({ message: 'Pasien tidak ditemukan' });
-        }
+        const connection = await db.getConnection();
+        await connection.beginTransaction();
 
-        await db.query(
-            `UPDATE Patients SET name=?, dob=?, gender=?, address=?, phone=?, status_mustahik=?, status_verification='Pending' WHERE id = ?`,
-            [name, dob, gender, address, phone, status_mustahik, patientId]
-        );
-
-        // Tambah dokumen baru jika ada
-        if (req.files && Object.keys(req.files).length > 0) {
-            const docTypes = Object.keys(req.files);
-            for (const type of docTypes) {
-                const file = req.files[type][0];
-                const docEnum = type.toUpperCase();
-                await db.query(
-                    'INSERT INTO Documents (patient_id, document_type, file_path) VALUES (?, ?, ?)',
-                    [patientId, docEnum, file.path]
-                );
+        try {
+            const [patients] = await connection.query('SELECT * FROM Patients WHERE id = ?', [oldPatientId]);
+            if (patients.length === 0) {
+                await connection.rollback();
+                connection.release();
+                return res.status(404).json({ message: 'Pasien tidak ditemukan' });
             }
-        }
 
-        const [[p]] = await db.query('SELECT registration_number FROM Patients WHERE id = ?', [patientId]);
-        res.status(200).json({
-            message: 'Pendaftaran ulang berhasil',
-            registration_number: p.registration_number,
-            patient_id: Number(patientId)
-        });
+            const existing = patients[0];
+
+            // Generate registration number baru untuk pendaftaran ulang
+            const regNum = `REG-YBM-${new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14)}`;
+
+            // Insert pasien baru (episode baru), nik tetap sama
+            const [insertResult] = await connection.query(
+                `INSERT INTO Patients (registration_number, name, nik, dob, gender, address, phone, status_mustahik, status_verification)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
+                [
+                    regNum,
+                    name || existing.name,
+                    existing.nik,
+                    dob || existing.dob,
+                    gender || existing.gender,
+                    address || existing.address,
+                    phone || existing.phone,
+                    status_mustahik || existing.status_mustahik || 'Mustahik'
+                ]
+            );
+
+            const newPatientId = insertResult.insertId;
+
+            // Salin dokumen lama ke pasien baru
+            const [oldDocs] = await connection.query(
+                'SELECT document_type, file_path FROM Documents WHERE patient_id = ?',
+                [oldPatientId]
+            );
+
+            if (Array.isArray(oldDocs) && oldDocs.length > 0) {
+                for (const doc of oldDocs) {
+                    await connection.query(
+                        'INSERT INTO Documents (patient_id, document_type, file_path) VALUES (?, ?, ?)',
+                        [newPatientId, doc.document_type, doc.file_path]
+                    );
+                }
+            }
+
+            // Tambah dokumen baru jika ada (override / tambahan)
+            if (req.files && Object.keys(req.files).length > 0) {
+                const docTypes = Object.keys(req.files);
+                for (const type of docTypes) {
+                    const file = req.files[type][0];
+                    const docEnum = type.toUpperCase();
+                    await connection.query(
+                        'INSERT INTO Documents (patient_id, document_type, file_path) VALUES (?, ?, ?)',
+                        [newPatientId, docEnum, file.path]
+                    );
+                }
+            }
+
+            await connection.commit();
+            connection.release();
+
+            res.status(201).json({
+                message: 'Pendaftaran ulang berhasil',
+                registration_number: regNum,
+                patient_id: Number(newPatientId)
+            });
+        } catch (error) {
+            await connection.rollback();
+            connection.release();
+            throw error;
+        }
     } catch (error) {
         console.error('reRegister error:', error);
         res.status(500).json({ message: 'Gagal melakukan pendaftaran ulang' });
