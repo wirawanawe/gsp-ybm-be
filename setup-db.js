@@ -47,6 +47,9 @@ async function setupDatabase() {
         phone VARCHAR(30) NOT NULL,
         status_mustahik ENUM('Mustahik', 'Non-Mustahik') NOT NULL,
         status_verification ENUM('Pending', 'Layak Mustahik', 'Rujukan Lain') DEFAULT 'Pending',
+        rt_rw VARCHAR(50), kelurahan VARCHAR(100), kecamatan VARCHAR(100),
+        kabupaten VARCHAR(100), provinsi VARCHAR(100),
+        diagnosis TEXT, treatment_plan TEXT, occupation VARCHAR(100), income VARCHAR(100),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -73,8 +76,9 @@ async function setupDatabase() {
         name VARCHAR(255) NOT NULL,
         nik VARCHAR(24) NOT NULL,
         relation VARCHAR(100) NOT NULL,
-        ktp_path VARCHAR(255) NOT NULL,
-        kk_path VARCHAR(255) NOT NULL,
+        phone VARCHAR(30),
+        ktp_path VARCHAR(255),
+        kk_path VARCHAR(255),
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE
@@ -126,7 +130,8 @@ async function setupDatabase() {
         bed_id INT,
         check_in_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         check_out_date TIMESTAMP NULL,
-        final_status ENUM('Sembuh', 'Rujukan Lanjut', 'Meninggal') NULL,
+        final_status ENUM('Sembuh', 'Rujukan Lanjut', 'Meninggal', 'Transfer') NULL,
+        transfer_reason TEXT NULL,
         FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE,
         FOREIGN KEY (bed_id) REFERENCES Beds(id) ON DELETE SET NULL
       )

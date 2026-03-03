@@ -164,7 +164,11 @@ exports.getPatientDocuments = async (req, res) => {
 const isValidNIK = (nik) => /^\d{16}$/.test(String(nik || '').trim());
 
 exports.registerPatient = async (req, res) => {
-    const { name, nik, dob, gender, address, phone, status_mustahik } = req.body;
+    const {
+        name, nik, dob, gender, address, phone, status_mustahik,
+        rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
+        diagnosis, treatment_plan, occupation, income
+    } = req.body;
 
     if (!isValidNIK(nik)) {
         return res.status(400).json({ message: 'NIK harus tepat 16 digit angka sesuai KTP' });
@@ -180,9 +184,12 @@ exports.registerPatient = async (req, res) => {
 
             // 1. Insert ke tabel Patients
             const [patientResult] = await connection.query(
-                `INSERT INTO Patients (registration_number, name, nik, dob, gender, address, phone, status_mustahik, status_verification)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
-                [regNum, name, nik, dob, gender, address, phone, status_mustahik]
+                `INSERT INTO Patients (registration_number, name, nik, dob, gender, address, phone, status_mustahik, status_verification,
+                 rt_rw, kelurahan, kecamatan, kabupaten, provinsi, diagnosis, treatment_plan, occupation, income)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [regNum, name, nik, dob, gender, address, phone, status_mustahik,
+                    rt_rw || null, kelurahan || null, kecamatan || null, kabupaten || null, provinsi || null,
+                    diagnosis || null, treatment_plan || null, occupation || null, income || null]
             );
 
             const patientId = patientResult.insertId;
@@ -232,7 +239,11 @@ exports.registerPatient = async (req, res) => {
 // - Dokumen lama disalin ke pasien baru (supaya tidak perlu upload ulang)
 exports.reRegister = async (req, res) => {
     const oldPatientId = req.params.id;
-    const { name, dob, gender, address, phone, status_mustahik } = req.body;
+    const {
+        name, dob, gender, address, phone, status_mustahik,
+        rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
+        diagnosis, treatment_plan, occupation, income
+    } = req.body;
 
     try {
         const connection = await db.getConnection();
@@ -253,8 +264,9 @@ exports.reRegister = async (req, res) => {
 
             // Insert pasien baru (episode baru), nik tetap sama
             const [insertResult] = await connection.query(
-                `INSERT INTO Patients (registration_number, name, nik, dob, gender, address, phone, status_mustahik, status_verification)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
+                `INSERT INTO Patients (registration_number, name, nik, dob, gender, address, phone, status_mustahik, status_verification,
+                 rt_rw, kelurahan, kecamatan, kabupaten, provinsi, diagnosis, treatment_plan, occupation, income)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     regNum,
                     name || existing.name,
@@ -263,7 +275,16 @@ exports.reRegister = async (req, res) => {
                     gender || existing.gender,
                     address || existing.address,
                     phone || existing.phone,
-                    status_mustahik || existing.status_mustahik || 'Mustahik'
+                    status_mustahik || existing.status_mustahik || 'Mustahik',
+                    rt_rw ?? existing.rt_rw,
+                    kelurahan ?? existing.kelurahan,
+                    kecamatan ?? existing.kecamatan,
+                    kabupaten ?? existing.kabupaten,
+                    provinsi ?? existing.provinsi,
+                    diagnosis ?? existing.diagnosis,
+                    treatment_plan ?? existing.treatment_plan,
+                    occupation ?? existing.occupation,
+                    income ?? existing.income
                 ]
             );
 
@@ -313,6 +334,62 @@ exports.reRegister = async (req, res) => {
     } catch (error) {
         console.error('reRegister error:', error);
         res.status(500).json({ message: 'Gagal melakukan pendaftaran ulang' });
+    }
+};
+
+// PUT /api/patients/:id
+// Update data pasien (untuk koreksi saat screening - data awal mungkin belum valid)
+exports.updatePatient = async (req, res) => {
+    const { id } = req.params;
+    const {
+        name, nik, dob, gender, address, phone, status_mustahik,
+        rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
+        diagnosis, treatment_plan, occupation, income
+    } = req.body;
+
+    try {
+        const updates = [];
+        const params = [];
+
+        const fields = {
+            name, nik, dob, gender, address, phone, status_mustahik,
+            rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
+            diagnosis, treatment_plan, occupation, income
+        };
+        for (const [key, value] of Object.entries(fields)) {
+            if (value !== undefined) {
+                updates.push(`${key} = ?`);
+                params.push(value === '' ? null : value);
+            }
+        }
+        if (updates.length === 0) {
+            return res.status(400).json({ message: 'Tidak ada data yang diupdate' });
+        }
+        params.push(id);
+        await db.query(
+            `UPDATE Patients SET ${updates.join(', ')} WHERE id = ?`,
+            params
+        );
+        res.json({ message: 'Data pasien berhasil diupdate' });
+    } catch (error) {
+        console.error('updatePatient error:', error);
+        res.status(500).json({ message: 'Gagal mengupdate data pasien' });
+    }
+};
+
+// DELETE /api/patients/:id
+// Hapus pasien beserta dokumen & penunggu terkait (mengikuti constraint di database)
+exports.deletePatient = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const [result] = await db.query('DELETE FROM Patients WHERE id = ?', [id]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: 'Pasien tidak ditemukan' });
+        }
+        res.json({ message: 'Pasien berhasil dihapus' });
+    } catch (error) {
+        console.error('deletePatient error:', error);
+        res.status(500).json({ message: 'Gagal menghapus pasien' });
     }
 };
 

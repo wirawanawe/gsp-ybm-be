@@ -22,9 +22,15 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 router.get('/', visitorController.getVisitors);
+// KTP/KK opsional - untuk registrasi sederhana penunggu (hanya NIK, Nama, No HP, Hubungan)
 router.post('/', upload.fields([
     { name: 'ktp', maxCount: 1 },
     { name: 'kk', maxCount: 1 }
 ]), visitorController.createVisitor);
+router.put('/:id', upload.fields([
+    { name: 'ktp', maxCount: 1 },
+    { name: 'kk', maxCount: 1 }
+]), visitorController.updateVisitor);
+router.delete('/:id', visitorController.deleteVisitor);
 
 module.exports = router;

@@ -53,7 +53,9 @@ router.post('/register', upload.fields([
     { name: 'rujukan', maxCount: 1 }
 ]), patientController.registerPatient);
 
+router.put('/:id', patientController.updatePatient);
 router.put('/:id/verify', patientController.verifyPatient);
+router.delete('/:id', patientController.deletePatient);
 router.post('/:id/re-register', upload.fields([
     { name: 'ktp', maxCount: 1 },
     { name: 'kk', maxCount: 1 },

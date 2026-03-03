@@ -251,6 +251,76 @@ exports.checkIn = async (req, res) => {
     }
 };
 
+// POST /api/rooms/transfer
+// Pindah kamar: dari bed saat ini ke bed tujuan dengan alasan
+exports.transfer = async (req, res) => {
+    const { from_bed_id, to_bed_id, reason } = req.body;
+    if (!from_bed_id || !to_bed_id) {
+        return res.status(400).json({ message: 'from_bed_id dan to_bed_id wajib' });
+    }
+    if (from_bed_id === to_bed_id) {
+        return res.status(400).json({ message: 'Bed tujuan harus berbeda' });
+    }
+    try {
+        const connection = await db.getConnection();
+        await connection.beginTransaction();
+
+        try {
+            const [fromBeds] = await connection.query('SELECT * FROM Beds WHERE id = ?', [from_bed_id]);
+            const [toBeds] = await connection.query('SELECT * FROM Beds WHERE id = ?', [to_bed_id]);
+            if (fromBeds.length === 0 || toBeds.length === 0) {
+                await connection.rollback();
+                connection.release();
+                return res.status(404).json({ message: 'Bed tidak ditemukan' });
+            }
+            if (fromBeds[0].is_available) {
+                await connection.rollback();
+                connection.release();
+                return res.status(400).json({ message: 'Bed asal kosong, tidak ada pasien untuk dipindah' });
+            }
+            if (!toBeds[0].is_available) {
+                await connection.rollback();
+                connection.release();
+                return res.status(400).json({ message: 'Bed tujuan sudah terisi' });
+            }
+
+            const [activeStays] = await connection.query(
+                'SELECT * FROM StayLogs WHERE bed_id = ? AND final_status IS NULL ORDER BY id DESC LIMIT 1',
+                [from_bed_id]
+            );
+            if (activeStays.length === 0) {
+                await connection.rollback();
+                connection.release();
+                return res.status(400).json({ message: 'Tidak ada stay aktif di bed asal' });
+            }
+            const stay = activeStays[0];
+
+            await connection.query(
+                'UPDATE StayLogs SET check_out_date = CURRENT_TIMESTAMP, final_status = ?, transfer_reason = ? WHERE id = ?',
+                ['Transfer', reason || null, stay.id]
+            );
+            await connection.query('UPDATE Beds SET is_available = TRUE WHERE id = ?', [from_bed_id]);
+
+            await connection.query(
+                'INSERT INTO StayLogs (patient_id, bed_id, transfer_reason) VALUES (?, ?, ?)',
+                [stay.patient_id, to_bed_id, reason || null]
+            );
+            await connection.query('UPDATE Beds SET is_available = FALSE WHERE id = ?', [to_bed_id]);
+
+            await connection.commit();
+            connection.release();
+            res.json({ message: 'Pindah kamar berhasil' });
+        } catch (err) {
+            await connection.rollback();
+            connection.release();
+            throw err;
+        }
+    } catch (error) {
+        console.error('transfer error:', error);
+        res.status(500).json({ message: 'Gagal memindah kamar' });
+    }
+};
+
 // PUT /api/rooms/check-out
 exports.checkOut = async (req, res) => {
     const { bed_id, final_status } = req.body; // e.g., 'Sembuh', 'Rujukan Lanjut', 'Meninggal'

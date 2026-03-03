@@ -4,6 +4,7 @@ const roomController = require('../controllers/roomController');
 
 // Stay Logs routes - HARUS sebelum :id agar /check-in dan /check-out tidak tertimpa
 router.post('/check-in', roomController.checkIn);
+router.post('/transfer', roomController.transfer);
 router.put('/check-out', roomController.checkOut);
 
 // Room routes
