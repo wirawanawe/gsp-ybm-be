@@ -337,6 +337,9 @@ exports.transfer = async (req, res) => {
 exports.checkOut = async (req, res) => {
     const bed_id = req.body.bed_id || req.body.bedId;
     const final_status = req.body.final_status || req.body.finalStatus || 'Sembuh';
+    if (!bed_id) {
+        return res.status(400).json({ message: 'bed_id wajib dikirim untuk checkout' });
+    }
     try {
         const connection = await db.getConnection();
         await connection.beginTransaction();
