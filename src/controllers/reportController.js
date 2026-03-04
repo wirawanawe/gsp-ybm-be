@@ -49,7 +49,7 @@ exports.getOccupancyStats = async (req, res) => {
 // Masih mendukung ?date=YYYY-MM-DD untuk kompatibilitas lama.
 // Laporan pasien masuk dan keluar per rentang tanggal (berdasarkan tanggal masuk/keluar).
 exports.getPatientInOut = async (req, res) => {
-    const { date, start_date, end_date } = req.query;
+    const { date, start_date, end_date, final_status } = req.query;
     // Backward compatibility: jika hanya ada ?date lama, pakai sebagai from/to
     let from = start_date || date || '';
     let to = end_date || date || '';
@@ -57,7 +57,7 @@ exports.getPatientInOut = async (req, res) => {
     if (to && !from) from = to;
 
     try {
-        const cacheKey = `report:patient-in-out:${JSON.stringify({ from, to })}`;
+        const cacheKey = `report:patient-in-out:${JSON.stringify({ from, to, final_status })}`;
         const cached = getCache(cacheKey);
         if (cached) {
             return res.json(cached);
@@ -68,6 +68,14 @@ exports.getPatientInOut = async (req, res) => {
         if (from && to) {
             whereClause += ' AND ((DATE(s.check_in_date) BETWEEN ? AND ?) OR (DATE(s.check_out_date) BETWEEN ? AND ?))';
             params.push(from, to, from, to);
+        }
+        if (final_status) {
+            if (final_status === 'Masih dirawat' || final_status === 'null') {
+                whereClause += ' AND s.final_status IS NULL';
+            } else {
+                whereClause += ' AND s.final_status = ?';
+                params.push(final_status);
+            }
         }
 
         const [rows] = await db.query(
@@ -133,7 +141,7 @@ exports.getAmbulanceUsage = async (req, res) => {
 // GET /api/reports/patient-in-out/export?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
 // Jika tanggal tidak diisi, export semua data.
 exports.exportPatientInOut = async (req, res) => {
-    const { date, start_date, end_date } = req.query;
+    const { date, start_date, end_date, final_status } = req.query;
     let from = start_date || date || '';
     let to = end_date || date || '';
     if (from && !to) to = from;
@@ -146,6 +154,14 @@ exports.exportPatientInOut = async (req, res) => {
         if (from && to) {
             whereClause += ' AND ((DATE(s.check_in_date) BETWEEN ? AND ?) OR (DATE(s.check_out_date) BETWEEN ? AND ?))';
             params.push(from, to, from, to);
+        }
+        if (final_status) {
+            if (final_status === 'Masih dirawat' || final_status === 'null') {
+                whereClause += ' AND s.final_status IS NULL';
+            } else {
+                whereClause += ' AND s.final_status = ?';
+                params.push(final_status);
+            }
         }
 
         const [rows] = await db.query(
