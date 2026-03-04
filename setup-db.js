@@ -132,6 +132,7 @@ async function setupDatabase() {
         check_out_date TIMESTAMP NULL,
         final_status ENUM('Sembuh', 'Rujukan Lanjut', 'Meninggal', 'Transfer') NULL,
         transfer_reason TEXT NULL,
+        departure_photo_path VARCHAR(255) NULL,
         FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE,
         FOREIGN KEY (bed_id) REFERENCES Beds(id) ON DELETE SET NULL
       )
@@ -153,6 +154,20 @@ async function setupDatabase() {
       )
     `);
     console.log('Table AmbulanceLogs created.');
+
+    // Create AmbulanceLogPatients table (relasi banyak pasien per booking)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS AmbulanceLogPatients (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        ambulance_log_id INT NOT NULL,
+        patient_id INT NOT NULL,
+        destination TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (ambulance_log_id) REFERENCES AmbulanceLogs(id) ON DELETE CASCADE,
+        FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('Table AmbulanceLogPatients created.');
 
     // Seed Data (Admin User)
     const bcrypt = require('bcrypt');

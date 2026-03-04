@@ -1,21 +1,51 @@
 const db = require('../config/db');
 
 // GET /api/ambulance/logs
+// Mengembalikan daftar log dengan kolom extra: patients (array) dan patient_name (gabungan)
 exports.getLogs = async (req, res) => {
     try {
         const [rows] = await db.query(
             `
         SELECT 
           al.*,
-          a.plate_number AS ambulance_plate,
-          p.name AS patient_name,
-          p.registration_number
+          a.plate_number AS ambulance_plate
         FROM AmbulanceLogs al
         JOIN Ambulances a ON al.ambulance_id = a.id
-        LEFT JOIN Patients p ON al.patient_id = p.id
         ORDER BY al.departure_time DESC
       `
         );
+
+        for (const row of rows) {
+            const [patients] = await db.query(
+                `
+          SELECT 
+            p.id, 
+            p.name AS patient_name, 
+            p.registration_number,
+            alp.destination
+          FROM AmbulanceLogPatients alp
+          JOIN Patients p ON p.id = alp.patient_id
+          WHERE alp.ambulance_log_id = ?
+        `,
+                [row.id]
+            );
+
+            // fallback untuk data lama yang hanya pakai AmbulanceLogs.patient_id
+            if (patients.length === 0 && row.patient_id) {
+                const [legacy] = await db.query(
+                    'SELECT id, name AS patient_name, registration_number FROM Patients WHERE id = ?',
+                    [row.patient_id]
+                );
+                row.patients = legacy;
+            } else {
+                row.patients = patients;
+            }
+
+            row.patient_name = Array.isArray(row.patients) && row.patients.length > 0
+                ? row.patients.map((p) => p.patient_name).join(', ')
+                : null;
+        }
+
         res.json(rows);
     } catch (error) {
         console.error('getLogs error:', error);
@@ -26,13 +56,25 @@ exports.getLogs = async (req, res) => {
 };
 
 // POST /api/ambulance/logs
+// Mendukung lebih dari satu pasien per booking melalui patient_ids (array)
 exports.createLog = async (req, res) => {
-    const { ambulance_id, patient_id, destination } = req.body;
+    const { ambulance_id, patient_id, patient_ids, destination, patient_destinations } = req.body;
 
-    if (!ambulance_id || !destination) {
+    if (!ambulance_id) {
         return res
             .status(400)
-            .json({ message: 'Ambulans dan tujuan perjalanan wajib diisi' });
+            .json({ message: 'Ambulans wajib diisi' });
+    }
+
+    // Normalisasi daftar pasien
+    const ids = Array.isArray(patient_ids)
+        ? patient_ids
+        : (patient_id ? [patient_id] : []);
+
+    if (!ids || ids.length === 0) {
+        return res
+            .status(400)
+            .json({ message: 'Minimal satu pasien harus dipilih untuk booking ambulans' });
     }
 
     try {
@@ -40,13 +82,30 @@ exports.createLog = async (req, res) => {
         await connection.beginTransaction();
 
         try {
+            const firstPatientId = ids.length > 0 ? ids[0] : null;
+
             const [result] = await connection.query(
                 `
           INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status)
           VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'In-Journey')
         `,
-                [ambulance_id, patient_id || null, destination]
+                [ambulance_id, firstPatientId || null, destination]
             );
+
+            const logId = result.insertId;
+
+            // Simpan semua pasien ke tabel relasi jika ada
+            if (ids.length > 0) {
+                for (const pid of ids) {
+                    if (!pid) continue;
+                    const destMap = patient_destinations || {};
+                    const perPatientDest = destMap[String(pid)] || destMap[pid] || destination;
+                    await connection.query(
+                        'INSERT IGNORE INTO AmbulanceLogPatients (ambulance_log_id, patient_id, destination) VALUES (?, ?, ?)',
+                        [logId, pid, perPatientDest || null]
+                    );
+                }
+            }
 
             await connection.query(
                 'UPDATE Ambulances SET status = "In-Journey" WHERE id = ?',
@@ -56,7 +115,7 @@ exports.createLog = async (req, res) => {
             await connection.commit();
             res.status(201).json({
                 message: 'Booking ambulans berhasil dibuat',
-                id: result.insertId
+                id: logId
             });
         } catch (err) {
             await connection.rollback();

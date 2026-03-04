@@ -6,26 +6,37 @@ const db = require('../config/db');
 exports.getRooms = async (req, res) => {
     try {
         const [rooms] = await db.query('SELECT * FROM Rooms');
-        // Fetch beds + pasien yang menempati (jika ada stay aktif) untuk setiap kamar
-        for (let room of rooms) {
-            const [beds] = await db.query(
-                `SELECT 
-                    b.*,
-                    p.name AS patient_name,
-                    p.registration_number AS patient_registration_number,
-                    s.check_in_date,
-                    s.check_out_date,
-                    s.final_status
-                 FROM Beds b
-                 LEFT JOIN StayLogs s 
-                    ON s.bed_id = b.id AND s.final_status IS NULL
-                 LEFT JOIN Patients p 
-                    ON p.id = s.patient_id
-                 WHERE b.room_id = ?`,
-                [room.id]
-            );
-            room.beds = beds;
+        if (rooms.length === 0) {
+            return res.json([]);
         }
+
+        const roomIds = rooms.map((r) => r.id);
+        const placeholders = roomIds.map(() => '?').join(',');
+
+        // Ambil semua bed + pasien aktif dalam satu query untuk semua kamar
+        const [beds] = await db.query(
+            `SELECT 
+                b.*,
+                p.name AS patient_name,
+                p.registration_number AS patient_registration_number,
+                s.id AS stay_log_id,
+                s.patient_id AS stay_patient_id,
+                s.check_in_date,
+                s.check_out_date,
+                s.final_status
+             FROM Beds b
+             LEFT JOIN StayLogs s 
+                ON s.bed_id = b.id AND s.final_status IS NULL
+             LEFT JOIN Patients p 
+                ON p.id = s.patient_id
+             WHERE b.room_id IN (${placeholders})`,
+            roomIds
+        );
+
+        for (const room of rooms) {
+            room.beds = (beds || []).filter((b) => b.room_id === room.id);
+        }
+
         res.json(rooms);
     } catch (error) {
         console.error('getRooms error:', error);
@@ -322,8 +333,10 @@ exports.transfer = async (req, res) => {
 };
 
 // PUT /api/rooms/check-out
+// Menerima multipart/form-data: bed_id, final_status, departure_photo (opsional)
 exports.checkOut = async (req, res) => {
-    const { bed_id, final_status } = req.body; // e.g., 'Sembuh', 'Rujukan Lanjut', 'Meninggal'
+    const bed_id = req.body.bed_id || req.body.bedId;
+    const final_status = req.body.final_status || req.body.finalStatus || 'Sembuh';
     try {
         const connection = await db.getConnection();
         await connection.beginTransaction();
@@ -346,11 +359,12 @@ exports.checkOut = async (req, res) => {
             }
 
             const stay = activeStays[0];
+            const photoPath = req.file ? `departure/${req.file.filename}` : null;
 
             // 2. Update StayLog
             await connection.query(
-                'UPDATE StayLogs SET check_out_date = CURRENT_TIMESTAMP, final_status = ? WHERE id = ?',
-                [final_status, stay.id]
+                'UPDATE StayLogs SET check_out_date = CURRENT_TIMESTAMP, final_status = ?, departure_photo_path = ? WHERE id = ?',
+                [final_status, photoPath, stay.id]
             );
 
             // 3. Mark Bed as Available

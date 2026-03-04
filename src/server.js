@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 // Load env variables
 dotenv.config();
@@ -20,9 +22,23 @@ const corsOptions = {
     credentials: true,
 };
 
+// Security headers
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' }, // supaya file uploads tetap bisa diakses FE
+}));
+
+// Global rate limiter untuk semua endpoint API
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 menit
+    max: 1000, // maksimal 1000 request / IP / window
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/api', apiLimiter);
 
 // Static folder for uploads
 app.use('/uploads', express.static('uploads'));

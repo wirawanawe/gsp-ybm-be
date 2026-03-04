@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const ExcelJS = require('exceljs');
+const { getCache, setCache } = require('../config/cache');
 
 // GET /api/reports/occupancy
 // Ringkasan data pasien & okupansi kamar berdasarkan tabel Patients dan StayLogs
@@ -44,36 +45,46 @@ exports.getOccupancyStats = async (req, res) => {
 };
 
 // GET /api/reports/patient-in-out?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
-// Jika hanya salah satu yang dikirim, akan dianggap sama (per satu tanggal)
+// Jika tanggal tidak diisi, tampilkan semua data (tanpa filter tanggal).
 // Masih mendukung ?date=YYYY-MM-DD untuk kompatibilitas lama.
 // Laporan pasien masuk dan keluar per rentang tanggal (berdasarkan tanggal masuk/keluar).
 exports.getPatientInOut = async (req, res) => {
     const { date, start_date, end_date } = req.query;
-    const today = new Date().toISOString().slice(0, 10);
-
-    // Backward compatibility: jika hanya ada ?date
-    let from = start_date || date || today;
-    let to = end_date || date || today;
-
-    // Jika hanya salah satu diisi, samakan
+    // Backward compatibility: jika hanya ada ?date lama, pakai sebagai from/to
+    let from = start_date || date || '';
+    let to = end_date || date || '';
     if (from && !to) to = from;
     if (to && !from) from = to;
 
     try {
+        const cacheKey = `report:patient-in-out:${JSON.stringify({ from, to })}`;
+        const cached = getCache(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+        let whereClause = '1=1';
+        const params = [];
+
+        if (from && to) {
+            whereClause += ' AND ((DATE(s.check_in_date) BETWEEN ? AND ?) OR (DATE(s.check_out_date) BETWEEN ? AND ?))';
+            params.push(from, to, from, to);
+        }
+
         const [rows] = await db.query(
             `SELECT 
                 s.id, s.patient_id, s.bed_id, s.check_in_date, s.check_out_date, s.final_status,
+                s.departure_photo_path,
                 p.name AS patient_name, p.registration_number, p.nik,
                 b.bed_number, r.room_number
              FROM StayLogs s
              JOIN Patients p ON p.id = s.patient_id
              LEFT JOIN Beds b ON b.id = s.bed_id
              LEFT JOIN Rooms r ON r.id = b.room_id
-             WHERE (DATE(s.check_in_date) BETWEEN ? AND ?)
-                OR (DATE(s.check_out_date) BETWEEN ? AND ?)
+             WHERE ${whereClause}
              ORDER BY s.check_in_date DESC`,
-            [from, to, from, to]
+            params
         );
+        setCache(cacheKey, rows, 60);
         res.json(rows);
     } catch (error) {
         console.error('getPatientInOut error:', error);
@@ -82,19 +93,23 @@ exports.getPatientInOut = async (req, res) => {
 };
 
 // GET /api/reports/ambulance-usage?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
-// Jika hanya salah satu yang dikirim, akan dianggap sama (per satu tanggal)
+// Jika tanggal tidak diisi, tampilkan semua data (tanpa filter tanggal).
 // Masih mendukung ?date=YYYY-MM-DD untuk kompatibilitas lama.
 // Laporan penggunaan ambulans per rentang tanggal (berdasarkan tanggal berangkat).
 exports.getAmbulanceUsage = async (req, res) => {
     const { date, start_date, end_date } = req.query;
-    const today = new Date().toISOString().slice(0, 10);
-
-    let from = start_date || date || today;
-    let to = end_date || date || today;
+    let from = start_date || date || '';
+    let to = end_date || date || '';
     if (from && !to) to = from;
     if (to && !from) from = to;
 
     try {
+        const cacheKey = `report:ambulance-usage:${JSON.stringify({ from, to })}`;
+        const cached = getCache(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+        const hasDate = from && to;
         const [rows] = await db.query(
             `SELECT 
                 al.id, al.ambulance_id, al.destination, al.departure_time, al.return_time, al.status,
@@ -103,10 +118,11 @@ exports.getAmbulanceUsage = async (req, res) => {
              FROM AmbulanceLogs al
              JOIN Ambulances a ON a.id = al.ambulance_id
              LEFT JOIN Patients p ON p.id = al.patient_id
-             WHERE DATE(al.departure_time) BETWEEN ? AND ?
+             ${hasDate ? 'WHERE DATE(al.departure_time) BETWEEN ? AND ?' : ''}
              ORDER BY al.departure_time DESC`,
-            [from, to]
+            hasDate ? [from, to] : []
         );
+        setCache(cacheKey, rows, 60);
         res.json(rows);
     } catch (error) {
         console.error('getAmbulanceUsage error:', error);
@@ -115,29 +131,36 @@ exports.getAmbulanceUsage = async (req, res) => {
 };
 
 // GET /api/reports/patient-in-out/export?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+// Jika tanggal tidak diisi, export semua data.
 exports.exportPatientInOut = async (req, res) => {
     const { date, start_date, end_date } = req.query;
-    const today = new Date().toISOString().slice(0, 10);
-
-    let from = start_date || date || today;
-    let to = end_date || date || today;
+    let from = start_date || date || '';
+    let to = end_date || date || '';
     if (from && !to) to = from;
     if (to && !from) from = to;
 
     try {
+        let whereClause = '1=1';
+        const params = [];
+
+        if (from && to) {
+            whereClause += ' AND ((DATE(s.check_in_date) BETWEEN ? AND ?) OR (DATE(s.check_out_date) BETWEEN ? AND ?))';
+            params.push(from, to, from, to);
+        }
+
         const [rows] = await db.query(
             `SELECT 
                 s.id, s.patient_id, s.bed_id, s.check_in_date, s.check_out_date, s.final_status,
+                s.departure_photo_path,
                 p.name AS patient_name, p.registration_number, p.nik,
                 b.bed_number, r.room_number
              FROM StayLogs s
              JOIN Patients p ON p.id = s.patient_id
              LEFT JOIN Beds b ON b.id = s.bed_id
              LEFT JOIN Rooms r ON r.id = b.room_id
-             WHERE (DATE(s.check_in_date) BETWEEN ? AND ?)
-                OR (DATE(s.check_out_date) BETWEEN ? AND ?)
+             WHERE ${whereClause}
              ORDER BY s.check_in_date DESC`,
-            [from, to, from, to]
+            params
         );
 
         const workbook = new ExcelJS.Workbook();
@@ -152,7 +175,8 @@ exports.exportPatientInOut = async (req, res) => {
             { header: 'Bed', key: 'bed_number', width: 8 },
             { header: 'Waktu Masuk', key: 'check_in_date', width: 22 },
             { header: 'Waktu Keluar', key: 'check_out_date', width: 22 },
-            { header: 'Status Akhir', key: 'final_status', width: 18 }
+            { header: 'Status Akhir', key: 'final_status', width: 18 },
+            { header: 'Dokumen Kepulangan', key: 'departure_photo_path', width: 30 }
         ];
 
         rows.forEach((row, index) => {
@@ -166,7 +190,8 @@ exports.exportPatientInOut = async (req, res) => {
                 // gunakan objek Date agar format jam muncul di Excel
                 check_in_date: row.check_in_date ? new Date(row.check_in_date) : null,
                 check_out_date: row.check_out_date ? new Date(row.check_out_date) : null,
-                final_status: row.final_status || 'Masih dirawat'
+                final_status: row.final_status || 'Masih dirawat',
+                departure_photo_path: row.departure_photo_path || ''
             });
         });
 
@@ -179,9 +204,10 @@ exports.exportPatientInOut = async (req, res) => {
             'Content-Type',
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
+        const fileLabel = from && to ? `${from}_sampai_${to}` : 'semua-data';
         res.setHeader(
             'Content-Disposition',
-            `attachment; filename="laporan-pasien-${from}_sampai_${to}.xlsx"`
+            `attachment; filename="laporan-pasien-${fileLabel}.xlsx"`
         );
 
         await workbook.xlsx.write(res);
