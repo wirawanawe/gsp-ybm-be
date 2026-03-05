@@ -34,7 +34,7 @@ async function setupDatabase() {
     `);
     console.log('Table Users created.');
 
-    // Create Patients table
+    // Create Patients table (tanpa status_mustahik/status_verification - ada di PatientRegistrations)
     await connection.query(`
       CREATE TABLE IF NOT EXISTS Patients (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -45,8 +45,6 @@ async function setupDatabase() {
         gender ENUM('Laki-laki', 'Perempuan') NOT NULL,
         address TEXT NOT NULL,
         phone VARCHAR(30) NOT NULL,
-        status_mustahik ENUM('Mustahik', 'Non-Mustahik') NOT NULL,
-        status_verification ENUM('Pending', 'Layak Mustahik', 'Rujukan Lain') DEFAULT 'Pending',
         rt_rw VARCHAR(50), kelurahan VARCHAR(100), kecamatan VARCHAR(100),
         kabupaten VARCHAR(100), provinsi VARCHAR(100),
         diagnosis TEXT, treatment_plan TEXT, occupation VARCHAR(100), income VARCHAR(100),
@@ -54,6 +52,24 @@ async function setupDatabase() {
       )
     `);
     console.log('Table Patients created.');
+
+    // Tabel registrasi pasien: riwayat registrasi per pasien, dengan status mustahik, verifikasi, dan rumah singgah
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS PatientRegistrations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        patient_id INT NOT NULL,
+        registration_number VARCHAR(50) NOT NULL,
+        status_mustahik ENUM('Mustahik', 'Non-Mustahik') NOT NULL DEFAULT 'Mustahik',
+        status_verification ENUM('Pending', 'Layak Mustahik', 'Rujukan Lain') DEFAULT 'Pending',
+        status_rumah_singgah ENUM('Menunggu', 'Dirawat', 'Sudah Pulang') DEFAULT 'Menunggu',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE,
+        INDEX idx_patient_reg (patient_id),
+        INDEX idx_reg_number (registration_number),
+        INDEX idx_status_verification (status_verification)
+      )
+    `);
+    console.log('Table PatientRegistrations created.');
 
     // Create Documents table
     await connection.query(`
@@ -138,6 +154,20 @@ async function setupDatabase() {
       )
     `);
     console.log('Table StayLogs created.');
+
+    // Create StayLogVisitors (penunggu per stay)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS StayLogVisitors (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        stay_log_id INT NOT NULL,
+        visitor_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (stay_log_id) REFERENCES StayLogs(id) ON DELETE CASCADE,
+        FOREIGN KEY (visitor_id) REFERENCES Visitors(id) ON DELETE CASCADE,
+        UNIQUE KEY uq_stay_visitor (stay_log_id, visitor_id)
+      )
+    `);
+    console.log('Table StayLogVisitors created.');
 
     // Create AmbulanceLogs table
     await connection.query(`

@@ -1,19 +1,19 @@
 const db = require('../config/db');
 
 // GET /api/visitors
-// Optional query: ?patient_id=123
+// Optional query: ?patient_id=123 — mengembalikan SEMUA penunggu pasien (termasuk is_active=0 agar data lama bisa dipilih lagi saat check-in)
 exports.getVisitors = async (req, res) => {
     const { patient_id } = req.query;
     try {
         let query = `
-      SELECT v.*, p.name as patient_name, p.registration_number
+      SELECT v.*, p.name AS patient_name
       FROM Visitors v
       JOIN Patients p ON v.patient_id = p.id
     `;
         const params = [];
 
         if (patient_id) {
-            query += ' WHERE v.patient_id = ?';
+            query += ' WHERE v.patient_id = ? ORDER BY v.is_active DESC, v.id DESC';
             params.push(patient_id);
         }
 
@@ -36,11 +36,36 @@ exports.createVisitor = async (req, res) => {
         return res.status(400).json({ message: 'NIK harus tepat 16 digit angka sesuai KTP' });
     }
 
+    // NIK dan no. telepon tidak boleh sama (di tabel Penunggu maupun Pasien)
+    const nikTrim = String(nik).trim();
+    const phoneTrim = phone ? String(phone).trim() : null;
+    const [existingV] = await db.query(
+        'SELECT id, nik, phone FROM Visitors WHERE nik = ? OR (? IS NOT NULL AND phone = ?)',
+        [nikTrim, phoneTrim, phoneTrim]
+    );
+    if (existingV.length > 0) {
+        if (existingV.some((r) => String(r.nik) === nikTrim)) {
+            return res.status(400).json({ message: 'No. KTP (NIK) sudah terdaftar sebagai penunggu.' });
+        }
+        return res.status(400).json({ message: 'No. telepon sudah terdaftar sebagai penunggu.' });
+    }
+    if (phoneTrim) {
+        const [existingP] = await db.query(
+            'SELECT id FROM Patients WHERE nik = ? OR phone = ?',
+            [nikTrim, phoneTrim]
+        );
+        if (existingP.length > 0) {
+            return res.status(400).json({ message: 'No. KTP atau No. telepon sudah terdaftar sebagai pasien.' });
+        }
+    } else {
+        const [existingP] = await db.query('SELECT id FROM Patients WHERE nik = ?', [nikTrim]);
+        if (existingP.length > 0) {
+            return res.status(400).json({ message: 'No. KTP sudah terdaftar sebagai pasien.' });
+        }
+    }
+
     const ktp_path = req.files && req.files['ktp'] ? req.files['ktp'][0].path : null;
     const kk_path = req.files && req.files['kk'] ? req.files['kk'][0].path : null;
-
-    // KTP/KK opsional - untuk registrasi sederhana penunggu
-    const hasDocs = ktp_path && kk_path;
 
     try {
         const connection = await db.getConnection();
@@ -79,6 +104,36 @@ exports.updateVisitor = async (req, res) => {
 
     if (nik && !isValidNIK(nik)) {
         return res.status(400).json({ message: 'NIK harus tepat 16 digit angka sesuai KTP' });
+    }
+
+    // Jika NIK atau telepon diubah, tidak boleh sama dengan penunggu lain atau pasien (kecuali diri sendiri)
+    if (nik !== undefined || phone !== undefined) {
+        const [current] = await db.query('SELECT nik, phone FROM Visitors WHERE id = ?', [id]);
+        if (current.length > 0) {
+            const checkNik = nik !== undefined ? String(nik).trim() : current[0].nik;
+            const checkPhone = phone !== undefined ? (phone ? String(phone).trim() : null) : (current[0].phone || null);
+            const [dupV] = await db.query(
+                'SELECT id, nik, phone FROM Visitors WHERE id != ? AND (nik = ? OR (? IS NOT NULL AND phone = ?))',
+                [id, checkNik, checkPhone, checkPhone]
+            );
+            if (dupV.length > 0) {
+                if (dupV.some((r) => String(r.nik) === checkNik)) {
+                    return res.status(400).json({ message: 'No. KTP (NIK) sudah terdaftar sebagai penunggu.' });
+                }
+                return res.status(400).json({ message: 'No. telepon sudah terdaftar sebagai penunggu.' });
+            }
+            if (checkPhone) {
+                const [dupP] = await db.query('SELECT id FROM Patients WHERE nik = ? OR phone = ?', [checkNik, checkPhone]);
+                if (dupP.length > 0) {
+                    return res.status(400).json({ message: 'No. KTP atau No. telepon sudah terdaftar sebagai pasien.' });
+                }
+            } else {
+                const [dupP] = await db.query('SELECT id FROM Patients WHERE nik = ?', [checkNik]);
+                if (dupP.length > 0) {
+                    return res.status(400).json({ message: 'No. KTP sudah terdaftar sebagai pasien.' });
+                }
+            }
+        }
     }
 
     try {

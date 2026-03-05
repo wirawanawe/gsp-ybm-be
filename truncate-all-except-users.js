@@ -1,20 +1,23 @@
 /**
- * Truncate semua tabel kecuali Users.
- * Menghapus semua data: Patients, Documents, Visitors, Rooms, Beds, StayLogs, Ambulances, AmbulanceLogs.
+ * Truncate semua data kecuali Users, Rooms, Ambulances.
+ * Tabel yang dikosongkan: AmbulanceLogPatients, AmbulanceLogs, StayLogVisitors, StayLogs,
+ * PatientRegistrations, Documents, Visitors, Beds, Patients.
  * Jalankan: node truncate-all-except-users.js
  */
 require('dotenv').config();
 const mysql = require('mysql2/promise');
 
+// Urutan: child dulu karena foreign key (yang di-referensi tetap ada: Rooms, Ambulances)
 const TABLES_TO_TRUNCATE = [
+  'AmbulanceLogPatients',
   'AmbulanceLogs',
+  'StayLogVisitors',
   'StayLogs',
+  'PatientRegistrations',
   'Documents',
   'Visitors',
   'Beds',
-  'Patients',
-  'Ambulances',
-  'Rooms'
+  'Patients'
 ];
 
 async function truncateAllExceptUsers() {
@@ -29,18 +32,24 @@ async function truncateAllExceptUsers() {
     });
 
     console.log(`Connected to database: ${dbName}`);
-    console.log('Truncating tables (Users will be kept)...');
+    console.log('Truncating tables (Users, Rooms, Ambulances will be kept)...');
 
     await connection.query('SET FOREIGN_KEY_CHECKS = 0');
 
     for (const table of TABLES_TO_TRUNCATE) {
-      await connection.query(`TRUNCATE TABLE \`${table}\``);
-      console.log(`  Truncated: ${table}`);
+      try {
+        await connection.query(`TRUNCATE TABLE \`${table}\``);
+        console.log(`  Truncated: ${table}`);
+      } catch (e) {
+        if (e.code === 'ER_NO_SUCH_TABLE') {
+          console.log(`  Skip (table not found): ${table}`);
+        } else throw e;
+      }
     }
 
     await connection.query('SET FOREIGN_KEY_CHECKS = 1');
 
-    console.log('Done. All data cleared except Users.');
+    console.log('Done. Data cleared except Users, Rooms, Ambulances.');
   } catch (error) {
     console.error('Error:', error.message);
     process.exit(1);

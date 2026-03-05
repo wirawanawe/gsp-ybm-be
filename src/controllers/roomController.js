@@ -37,6 +37,41 @@ exports.getRooms = async (req, res) => {
             room.beds = (beds || []).filter((b) => b.room_id === room.id);
         }
 
+        // Isi stay_visitors per bed (untuk fitur Tambah Penunggu)
+        const stayLogIds = [...new Set((beds || []).map((b) => b.stay_log_id).filter(Boolean))];
+        if (stayLogIds.length > 0) {
+            const placeholdersStay = stayLogIds.map(() => '?').join(',');
+            const [svRows] = await db.query(
+                `SELECT slv.stay_log_id, v.id AS visitor_id, v.name, v.nik, v.relation, v.phone
+                 FROM StayLogVisitors slv
+                 INNER JOIN Visitors v ON v.id = slv.visitor_id
+                 WHERE slv.stay_log_id IN (${placeholdersStay})`,
+                stayLogIds
+            );
+            const byStay = {};
+            for (const row of svRows || []) {
+                if (!byStay[row.stay_log_id]) byStay[row.stay_log_id] = [];
+                byStay[row.stay_log_id].push({
+                    id: row.visitor_id,
+                    name: row.name,
+                    nik: row.nik,
+                    relation: row.relation,
+                    phone: row.phone
+                });
+            }
+            for (const room of rooms) {
+                for (const bed of room.beds || []) {
+                    bed.stay_visitors = byStay[bed.stay_log_id] || [];
+                }
+            }
+        } else {
+            for (const room of rooms) {
+                for (const bed of room.beds || []) {
+                    bed.stay_visitors = [];
+                }
+            }
+        }
+
         res.json(rooms);
     } catch (error) {
         console.error('getRooms error:', error);
@@ -217,10 +252,9 @@ exports.deleteBed = async (req, res) => {
 // --- CHECK IN (STAY LOGS) ---
 
 // POST /api/rooms/check-in
-// Data penunggu sekarang diambil dari tabel Visitors (registrasi penunggu),
-// sehingga companion_name / companion_nik yang dikirim dari frontend tidak lagi dipakai di sini.
+// Menerima patient_id, bed_id, dan opsional visitor_id (atau visitor_ids array) untuk penunggu.
 exports.checkIn = async (req, res) => {
-    const { patient_id, bed_id } = req.body;
+    const { patient_id, bed_id, visitor_id, visitor_ids } = req.body;
     try {
         // Check if bed is available
         const [beds] = await db.query('SELECT is_available FROM Beds WHERE id = ?', [bed_id]);
@@ -245,7 +279,29 @@ exports.checkIn = async (req, res) => {
                 [bed_id]
             );
 
-            // 3. Tidak mengubah status_verification pasien di sini.
+            // 2b. Update status_rumah_singgah di PatientRegistrations jadi Dirawat
+            await connection.query(
+                "UPDATE PatientRegistrations SET status_rumah_singgah = 'Dirawat' WHERE patient_id = ?",
+                [patient_id]
+            );
+
+            // 3. Simpan penunggu ke StayLogVisitors (visitor_id atau visitor_ids)
+            const vIds = [];
+            if (visitor_id) vIds.push(Number(visitor_id));
+            if (Array.isArray(visitor_ids)) visitor_ids.forEach((v) => vIds.push(Number(v)));
+            const uniqueIds = [...new Set(vIds)].filter(Boolean);
+            for (const vid of uniqueIds) {
+                await connection.query(
+                    'INSERT IGNORE INTO StayLogVisitors (stay_log_id, visitor_id) VALUES (?, ?)',
+                    [stayId, vid]
+                );
+                await connection.query(
+                    'UPDATE Visitors SET is_active = TRUE WHERE id = ?',
+                    [vid]
+                );
+            }
+
+            // 4. Tidak mengubah status_verification pasien di sini.
             //    Status verifikasi tetap dikelola di modul Verifikasi Pasien.
 
             await connection.commit();
@@ -382,6 +438,12 @@ exports.checkOut = async (req, res) => {
                 [stay.patient_id]
             );
 
+            // 5. Update status_rumah_singgah di PatientRegistrations jadi Sudah Pulang
+            await connection.query(
+                "UPDATE PatientRegistrations SET status_rumah_singgah = 'Sudah Pulang' WHERE patient_id = ?",
+                [stay.patient_id]
+            );
+
             await connection.commit();
             res.json({ message: 'Check-out berhasil disimpan' });
         } catch (err) {
@@ -393,5 +455,39 @@ exports.checkOut = async (req, res) => {
     } catch (error) {
         console.error('checkOut error:', error);
         res.status(500).json({ message: 'Gagal melakukan check-out' });
+    }
+};
+
+// POST /api/rooms/stay/:stayId/visitors — Tambah penunggu ke stay aktif
+exports.addStayVisitor = async (req, res) => {
+    const stayId = req.params.stayId;
+    const { visitor_id } = req.body;
+    if (!visitor_id) {
+        return res.status(400).json({ message: 'visitor_id wajib' });
+    }
+    try {
+        const [stays] = await db.query(
+            'SELECT id, patient_id FROM StayLogs WHERE id = ? AND final_status IS NULL',
+            [stayId]
+        );
+        if (stays.length === 0) {
+            return res.status(404).json({ message: 'Stay tidak ditemukan atau sudah checkout' });
+        }
+        const patientId = stays[0].patient_id;
+        const [visitors] = await db.query(
+            'SELECT id FROM Visitors WHERE id = ? AND patient_id = ?',
+            [visitor_id, patientId]
+        );
+        if (visitors.length === 0) {
+            return res.status(400).json({ message: 'Penunggu tidak ditemukan atau bukan milik pasien ini' });
+        }
+        await db.query(
+            'INSERT IGNORE INTO StayLogVisitors (stay_log_id, visitor_id) VALUES (?, ?)',
+            [stayId, visitor_id]
+        );
+        res.json({ message: 'Penunggu berhasil ditambahkan' });
+    } catch (error) {
+        console.error('addStayVisitor error:', error);
+        res.status(500).json({ message: 'Gagal menambah penunggu' });
     }
 };

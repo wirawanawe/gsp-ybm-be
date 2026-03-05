@@ -81,7 +81,7 @@ exports.getPatientInOut = async (req, res) => {
         const [rows] = await db.query(
             `SELECT 
                 s.id, s.patient_id, s.bed_id, s.check_in_date, s.check_out_date, s.final_status,
-                s.departure_photo_path,
+                s.departure_photo_path, s.transfer_reason,
                 p.name AS patient_name, p.registration_number, p.nik,
                 b.bed_number, r.room_number
              FROM StayLogs s
@@ -167,7 +167,7 @@ exports.exportPatientInOut = async (req, res) => {
         const [rows] = await db.query(
             `SELECT 
                 s.id, s.patient_id, s.bed_id, s.check_in_date, s.check_out_date, s.final_status,
-                s.departure_photo_path,
+                s.departure_photo_path, s.transfer_reason,
                 p.name AS patient_name, p.registration_number, p.nik,
                 b.bed_number, r.room_number
              FROM StayLogs s
@@ -192,10 +192,16 @@ exports.exportPatientInOut = async (req, res) => {
             { header: 'Waktu Masuk', key: 'check_in_date', width: 22 },
             { header: 'Waktu Keluar', key: 'check_out_date', width: 22 },
             { header: 'Status Akhir', key: 'final_status', width: 18 },
-            { header: 'Dokumen Kepulangan', key: 'departure_photo_path', width: 30 }
+            { header: 'Deskripsi', key: 'deskripsi', width: 35 }
         ];
 
         rows.forEach((row, index) => {
+            let deskripsi = '';
+            if (row.final_status === 'Transfer') {
+                deskripsi = row.transfer_reason || '-';
+            } else if ((row.final_status === 'Rujukan Lanjut' || row.final_status === 'Sembuh' || row.final_status === 'Meninggal') && row.departure_photo_path) {
+                deskripsi = 'Dokumen Kepulangan: ' + row.departure_photo_path;
+            }
             sheet.addRow({
                 no: index + 1,
                 patient_name: row.patient_name,
@@ -203,11 +209,10 @@ exports.exportPatientInOut = async (req, res) => {
                 nik: row.nik,
                 room_number: row.room_number || '',
                 bed_number: row.bed_number || '',
-                // gunakan objek Date agar format jam muncul di Excel
                 check_in_date: row.check_in_date ? new Date(row.check_in_date) : null,
                 check_out_date: row.check_out_date ? new Date(row.check_out_date) : null,
                 final_status: row.final_status || 'Masih dirawat',
-                departure_photo_path: row.departure_photo_path || ''
+                deskripsi
             });
         });
 

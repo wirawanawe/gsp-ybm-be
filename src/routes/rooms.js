@@ -25,6 +25,7 @@ const uploadDeparture = multer({ storage: departureStorage });
 router.post('/check-in', roomController.checkIn);
 router.post('/transfer', roomController.transfer);
 router.put('/check-out', uploadDeparture.single('departure_photo'), roomController.checkOut);
+router.post('/stay/:stayId/visitors', roomController.addStayVisitor);
 
 // Room routes
 router.get('/', roomController.getRooms);
