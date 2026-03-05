@@ -9,6 +9,9 @@ dotenv.config();
 
 const app = express();
 
+// Di belakang reverse proxy (Nginx, PM2, dll.) agar express-rate-limit mengenali IP asli dari X-Forwarded-For
+app.set('trust proxy', 1);
+
 // CORS - izinkan localhost:3000 dan FRONTEND_URL (mis. http://192.168.18.49:3000)
 const allowedOrigins = ['http://localhost:3330'];
 if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL.trim());

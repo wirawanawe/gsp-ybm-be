@@ -63,10 +63,10 @@ async function setupDatabase() {
         status_verification ENUM('Pending', 'Layak Mustahik', 'Rujukan Lain') DEFAULT 'Pending',
         status_rumah_singgah ENUM('Menunggu', 'Dirawat', 'Sudah Pulang') DEFAULT 'Menunggu',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE,
-        INDEX idx_patient_reg (patient_id),
-        INDEX idx_reg_number (registration_number),
-        INDEX idx_status_verification (status_verification)
+        CONSTRAINT fk_pr_patient FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE,
+        INDEX idx_pr_patient_reg (patient_id),
+        INDEX idx_pr_reg_number (registration_number),
+        INDEX idx_pr_status_verification (status_verification)
       )
     `);
     console.log('Table PatientRegistrations created.');
