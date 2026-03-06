@@ -254,7 +254,7 @@ exports.deleteBed = async (req, res) => {
 // POST /api/rooms/check-in
 // Menerima patient_id, bed_id, dan opsional visitor_id (atau visitor_ids array) untuk penunggu.
 exports.checkIn = async (req, res) => {
-    const { patient_id, bed_id, visitor_id, visitor_ids } = req.body;
+    const { patient_id, bed_id, visitor_id, visitor_ids, check_in_date } = req.body;
     try {
         // Check if bed is available
         const [beds] = await db.query('SELECT is_available FROM Beds WHERE id = ?', [bed_id]);
@@ -267,10 +267,18 @@ exports.checkIn = async (req, res) => {
 
         try {
             // 1. Create StayLog (final_status dibiarkan NULL sebagai tanda masih aktif)
-            const [stayResult] = await connection.query(
-                'INSERT INTO StayLogs (patient_id, bed_id) VALUES (?, ?)',
-                [patient_id, bed_id]
-            );
+            let stayResult;
+            if (check_in_date) {
+                [stayResult] = await connection.query(
+                    'INSERT INTO StayLogs (patient_id, bed_id, check_in_date) VALUES (?, ?, ?)',
+                    [patient_id, bed_id, check_in_date]
+                );
+            } else {
+                [stayResult] = await connection.query(
+                    'INSERT INTO StayLogs (patient_id, bed_id) VALUES (?, ?)',
+                    [patient_id, bed_id]
+                );
+            }
             const stayId = stayResult.insertId;
 
             // 2. Mark Bed as Unavailable
@@ -419,12 +427,20 @@ exports.checkOut = async (req, res) => {
 
             const stay = activeStays[0];
             const photoPath = req.file ? `departure/${req.file.filename}` : null;
+            const checkOutTimestamp = req.body.check_out_date || null;
 
             // 2. Update StayLog
-            await connection.query(
-                'UPDATE StayLogs SET check_out_date = CURRENT_TIMESTAMP, final_status = ?, departure_photo_path = ? WHERE id = ?',
-                [final_status, photoPath, stay.id]
-            );
+            if (checkOutTimestamp) {
+                await connection.query(
+                    'UPDATE StayLogs SET check_out_date = ?, final_status = ?, departure_photo_path = ? WHERE id = ?',
+                    [checkOutTimestamp, final_status, photoPath, stay.id]
+                );
+            } else {
+                await connection.query(
+                    'UPDATE StayLogs SET check_out_date = CURRENT_TIMESTAMP, final_status = ?, departure_photo_path = ? WHERE id = ?',
+                    [final_status, photoPath, stay.id]
+                );
+            }
 
             // 3. Mark Bed as Available
             await connection.query(

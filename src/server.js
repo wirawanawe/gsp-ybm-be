@@ -80,6 +80,15 @@ app.get('/', (req, res) => {
     res.send('API GSP YBM is running...');
 });
 
+// Global Error Handler
+app.use((err, req, res, next) => {
+    console.error('Unhandled Error:', err.stack || err);
+    res.status(err.status || 500).json({
+        message: err.message || 'Terjadi kesalahan sistem',
+        error: process.env.NODE_ENV === 'development' ? err : {}
+    });
+});
+
 const PORT = process.env.PORT || 3331;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

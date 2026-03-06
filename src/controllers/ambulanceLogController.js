@@ -22,7 +22,8 @@ exports.getLogs = async (req, res) => {
             p.id, 
             p.name AS patient_name, 
             p.registration_number,
-            alp.destination
+            alp.destination,
+            alp.document_path
           FROM AmbulanceLogPatients alp
           JOIN Patients p ON p.id = alp.patient_id
           WHERE alp.ambulance_log_id = ?
@@ -58,7 +59,15 @@ exports.getLogs = async (req, res) => {
 // POST /api/ambulance/logs
 // Mendukung lebih dari satu pasien per booking melalui patient_ids (array)
 exports.createLog = async (req, res) => {
-    const { ambulance_id, patient_id, patient_ids, destination, patient_destinations } = req.body;
+    let { ambulance_id, patient_id, patient_ids, destination, patient_destinations, departure_time } = req.body;
+
+    // Parse array/object fields if they are sent as strings via FormData
+    try {
+        if (typeof patient_ids === 'string') patient_ids = JSON.parse(patient_ids);
+        if (typeof patient_destinations === 'string') patient_destinations = JSON.parse(patient_destinations);
+    } catch (e) {
+        console.error('Error parsing JSON from formData:', e);
+    }
 
     if (!ambulance_id) {
         return res
@@ -84,13 +93,24 @@ exports.createLog = async (req, res) => {
         try {
             const firstPatientId = ids.length > 0 ? ids[0] : null;
 
-            const [result] = await connection.query(
-                `
+            let result;
+            if (departure_time) {
+                [result] = await connection.query(
+                    `
+          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status)
+          VALUES (?, ?, ?, ?, 'In-Journey')
+        `,
+                    [ambulance_id, firstPatientId || null, destination, departure_time]
+                );
+            } else {
+                [result] = await connection.query(
+                    `
           INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status)
           VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'In-Journey')
         `,
-                [ambulance_id, firstPatientId || null, destination]
-            );
+                    [ambulance_id, firstPatientId || null, destination]
+                );
+            }
 
             const logId = result.insertId;
 
@@ -100,9 +120,19 @@ exports.createLog = async (req, res) => {
                     if (!pid) continue;
                     const destMap = patient_destinations || {};
                     const perPatientDest = destMap[String(pid)] || destMap[pid] || destination;
+                    
+                    // Check if a file was uploaded for this patient
+                    let documentPath = null;
+                    if (req.files && Array.isArray(req.files)) {
+                        const file = req.files.find(f => f.fieldname === `document_${pid}`);
+                        if (file) {
+                            documentPath = `ambulance/${file.filename}`;
+                        }
+                    }
+
                     await connection.query(
-                        'INSERT IGNORE INTO AmbulanceLogPatients (ambulance_log_id, patient_id, destination) VALUES (?, ?, ?)',
-                        [logId, pid, perPatientDest || null]
+                        'INSERT IGNORE INTO AmbulanceLogPatients (ambulance_log_id, patient_id, destination, document_path) VALUES (?, ?, ?, ?)',
+                        [logId, pid, perPatientDest || null, documentPath]
                     );
                 }
             }
@@ -134,6 +164,7 @@ exports.createLog = async (req, res) => {
 // PUT /api/ambulance/logs/:id/complete
 exports.completeLog = async (req, res) => {
     const { id } = req.params;
+    const { return_time } = req.body;
 
     try {
         const connection = await db.getConnection();
@@ -151,14 +182,25 @@ exports.completeLog = async (req, res) => {
             const log = logs[0];
 
             // Update log
-            await connection.query(
-                `
+            if (return_time) {
+                await connection.query(
+                    `
+          UPDATE AmbulanceLogs
+          SET status = 'Completed', return_time = ?
+          WHERE id = ?
+        `,
+                    [return_time, id]
+                );
+            } else {
+                await connection.query(
+                    `
           UPDATE AmbulanceLogs
           SET status = 'Completed', return_time = CURRENT_TIMESTAMP
           WHERE id = ?
         `,
-                [id]
-            );
+                    [id]
+                );
+            }
 
             // Kembalikan status ambulans menjadi Available
             await connection.query(
