@@ -192,6 +192,7 @@ async function setupDatabase() {
         ambulance_log_id INT NOT NULL,
         patient_id INT NOT NULL,
         destination TEXT NULL,
+        document_path VARCHAR(255) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (ambulance_log_id) REFERENCES AmbulanceLogs(id) ON DELETE CASCADE,
         FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE
