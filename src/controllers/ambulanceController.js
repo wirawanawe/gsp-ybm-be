@@ -45,8 +45,8 @@ exports.createAmbulance = async (req, res) => {
 
     try {
         const [result] = await db.query(
-            'INSERT INTO Ambulances (plate_number, vehicle_model, status) VALUES (?, ?, ?)',
-            [plate_number, vehicle_model, status || 'Available']
+            'INSERT INTO Ambulances (plate_number, vehicle_model, status, created_by) VALUES (?, ?, ?, ?)',
+            [plate_number, vehicle_model, status || 'Available', req.user?.id || null]
         );
         res.status(201).json({ message: 'Ambulans berhasil ditambahkan', id: result.insertId });
     } catch (error) {
@@ -76,8 +76,8 @@ exports.updateAmbulance = async (req, res) => {
         const newStatus = status || current.status;
 
         const [result] = await db.query(
-            'UPDATE Ambulances SET plate_number = ?, vehicle_model = ?, status = ? WHERE id = ?',
-            [newPlate, newModel, newStatus, id]
+            'UPDATE Ambulances SET plate_number = ?, vehicle_model = ?, status = ?, updated_by = ? WHERE id = ?',
+            [newPlate, newModel, newStatus, req.user?.id || null, id]
         );
 
         if (result.affectedRows === 0) {

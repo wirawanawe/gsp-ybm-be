@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const authMiddleware = require('../config/authMiddleware');
 const reportController = require('../controllers/reportController');
+
+router.use(authMiddleware);
 
 // Laporan okupansi & pasien
 router.get('/occupancy', reportController.getOccupancyStats);

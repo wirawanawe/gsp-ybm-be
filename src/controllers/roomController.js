@@ -117,15 +117,16 @@ exports.createRoom = async (req, res) => {
     const { room_number, floor, capacity, description } = req.body;
     const numBeds = Math.max(1, parseInt(capacity, 10) || 1);
     try {
+        const userId = req.user?.id || null;
         const [result] = await db.query(
-            'INSERT INTO Rooms (room_number, floor, capacity, description) VALUES (?, ?, ?, ?)',
-            [room_number, floor, numBeds, description]
+            'INSERT INTO Rooms (room_number, floor, capacity, description, created_by) VALUES (?, ?, ?, ?, ?)',
+            [room_number, floor, numBeds, description, userId]
         );
         const roomId = result.insertId;
         for (let i = 1; i <= numBeds; i++) {
             await db.query(
-                'INSERT INTO Beds (room_id, bed_number, is_available) VALUES (?, ?, TRUE)',
-                [roomId, String(i)]
+                'INSERT INTO Beds (room_id, bed_number, is_available, created_by) VALUES (?, ?, TRUE, ?)',
+                [roomId, String(i), userId]
             );
         }
         res.status(201).json({ message: 'Kamar dan bed berhasil ditambahkan', id: roomId, bedsCreated: numBeds });
@@ -155,12 +156,64 @@ exports.updateRoom = async (req, res) => {
         const newCapacity = typeof capacity === 'number' ? capacity : current.capacity;
         const newDescription = description !== undefined ? description : current.description;
 
-        await db.query(
-            'UPDATE Rooms SET room_number = ?, floor = ?, capacity = ?, description = ? WHERE id = ?',
-            [newRoomNumber, newFloor, newCapacity, newDescription, id]
-        );
+        const connection = await db.getConnection();
+        await connection.beginTransaction();
 
-        res.json({ message: 'Kamar berhasil diupdate' });
+        try {
+            // Ambil data bed yang ada sekarang
+            const [existingBeds] = await connection.query('SELECT id, is_available FROM Beds WHERE room_id = ? ORDER BY id ASC', [id]);
+            const currentBedsCount = existingBeds.length;
+
+            // Jika kapasitas dikurangi, pastikan ada bed kosong yang bisa dihapus
+            if (newCapacity < currentBedsCount) {
+                const bedsToRemoveCount = currentBedsCount - newCapacity;
+                const emptyBeds = existingBeds.filter(b => b.is_available).reverse(); // Ambil dari belakang/ID terbesar
+
+                if (emptyBeds.length < bedsToRemoveCount) {
+                    await connection.rollback();
+                    connection.release();
+                    return res.status(400).json({
+                        message: `Kapasitas tidak bisa dikurangi menjadi ${newCapacity}. Hanya ada ${emptyBeds.length} bed kosong, tapi butuh menghapus ${bedsToRemoveCount} bed. Kosongkan bed terisi terlebih dahulu.`
+                    });
+                }
+
+                // Hapus bed kosong
+                const bedsToDelete = emptyBeds.slice(0, bedsToRemoveCount).map(b => b.id);
+                if (bedsToDelete.length > 0) {
+                    const placeholders = bedsToDelete.map(() => '?').join(',');
+                    await connection.query(
+                        `DELETE FROM Beds WHERE id IN (${placeholders})`,
+                        bedsToDelete
+                    );
+                }
+            }
+
+            // Update data kamar
+            await connection.query(
+                'UPDATE Rooms SET room_number = ?, floor = ?, capacity = ?, description = ?, updated_by = ? WHERE id = ?',
+                [newRoomNumber, newFloor, newCapacity, newDescription, req.user?.id || null, id]
+            );
+
+            // Jika kapasitas ditambah, buat bed baru
+            if (newCapacity > currentBedsCount) {
+                const bedsToAdd = newCapacity - currentBedsCount;
+                let nextNum = currentBedsCount + 1;
+                for (let i = 0; i < bedsToAdd; i++) {
+                    await connection.query(
+                        'INSERT INTO Beds (room_id, bed_number, is_available, created_by) VALUES (?, ?, TRUE, ?)',
+                        [id, String(nextNum + i), req.user?.id || null]
+                    );
+                }
+            }
+
+            await connection.commit();
+            connection.release();
+            res.json({ message: 'Kamar berhasil diupdate dan kapasitas bed telah disinkronisasi' });
+        } catch (err) {
+            await connection.rollback();
+            connection.release();
+            throw err;
+        }
     } catch (error) {
         console.error('updateRoom error:', error);
         if (error.code === 'ER_DUP_ENTRY') {
@@ -194,8 +247,8 @@ exports.createBed = async (req, res) => {
 
     try {
         const [result] = await db.query(
-            'INSERT INTO Beds (room_id, bed_number, bed_type) VALUES (?, ?, ?)',
-            [roomId, bed_number, bed_type]
+            'INSERT INTO Beds (room_id, bed_number, bed_type, created_by) VALUES (?, ?, ?, ?)',
+            [roomId, bed_number, bed_type, req.user?.id || null]
         );
         res.status(201).json({ message: 'Bed berhasil ditambahkan', id: result.insertId });
     } catch (error) {
@@ -222,8 +275,8 @@ exports.updateBed = async (req, res) => {
             typeof is_available === 'boolean' ? is_available : current.is_available;
 
         await db.query(
-            'UPDATE Beds SET bed_number = ?, bed_type = ?, is_available = ? WHERE id = ?',
-            [newBedNumber, newBedType, newIsAvailable, bedId]
+            'UPDATE Beds SET bed_number = ?, bed_type = ?, is_available = ?, updated_by = ? WHERE id = ?',
+            [newBedNumber, newBedType, newIsAvailable, req.user?.id || null, bedId]
         );
 
         res.json({ message: 'Bed berhasil diupdate' });
@@ -266,31 +319,32 @@ exports.checkIn = async (req, res) => {
         await connection.beginTransaction();
 
         try {
+            const userId = req.user?.id || null;
             // 1. Create StayLog (final_status dibiarkan NULL sebagai tanda masih aktif)
             let stayResult;
             if (check_in_date) {
                 [stayResult] = await connection.query(
-                    'INSERT INTO StayLogs (patient_id, bed_id, check_in_date) VALUES (?, ?, ?)',
-                    [patient_id, bed_id, check_in_date]
+                    'INSERT INTO StayLogs (patient_id, bed_id, check_in_date, created_by) VALUES (?, ?, ?, ?)',
+                    [patient_id, bed_id, check_in_date, userId]
                 );
             } else {
                 [stayResult] = await connection.query(
-                    'INSERT INTO StayLogs (patient_id, bed_id) VALUES (?, ?)',
-                    [patient_id, bed_id]
+                    'INSERT INTO StayLogs (patient_id, bed_id, created_by) VALUES (?, ?, ?)',
+                    [patient_id, bed_id, userId]
                 );
             }
             const stayId = stayResult.insertId;
 
             // 2. Mark Bed as Unavailable
             await connection.query(
-                'UPDATE Beds SET is_available = FALSE WHERE id = ?',
-                [bed_id]
+                'UPDATE Beds SET is_available = FALSE, updated_by = ? WHERE id = ?',
+                [userId, bed_id]
             );
 
             // 2b. Update status_rumah_singgah di PatientRegistrations jadi Dirawat
             await connection.query(
-                "UPDATE PatientRegistrations SET status_rumah_singgah = 'Dirawat' WHERE patient_id = ?",
-                [patient_id]
+                "UPDATE PatientRegistrations SET status_rumah_singgah = 'Dirawat', updated_by = ? WHERE patient_id = ?",
+                [userId, patient_id]
             );
 
             // 3. Simpan penunggu ke StayLogVisitors (visitor_id atau visitor_ids)
@@ -300,8 +354,8 @@ exports.checkIn = async (req, res) => {
             const uniqueIds = [...new Set(vIds)].filter(Boolean);
             for (const vid of uniqueIds) {
                 await connection.query(
-                    'INSERT IGNORE INTO StayLogVisitors (stay_log_id, visitor_id) VALUES (?, ?)',
-                    [stayId, vid]
+                    'INSERT IGNORE INTO StayLogVisitors (stay_log_id, visitor_id, created_by) VALUES (?, ?, ?)',
+                    [stayId, vid, userId]
                 );
                 await connection.query(
                     'UPDATE Visitors SET is_active = TRUE WHERE id = ?',
@@ -370,17 +424,18 @@ exports.transfer = async (req, res) => {
             }
             const stay = activeStays[0];
 
+            const userId = req.user?.id || null;
             await connection.query(
-                'UPDATE StayLogs SET check_out_date = CURRENT_TIMESTAMP, final_status = ?, transfer_reason = ? WHERE id = ?',
-                ['Transfer', reason || null, stay.id]
+                'UPDATE StayLogs SET check_out_date = CURRENT_TIMESTAMP, final_status = ?, transfer_reason = ?, updated_by = ? WHERE id = ?',
+                ['Transfer', reason || null, userId, stay.id]
             );
-            await connection.query('UPDATE Beds SET is_available = TRUE WHERE id = ?', [from_bed_id]);
+            await connection.query('UPDATE Beds SET is_available = TRUE, updated_by = ? WHERE id = ?', [userId, from_bed_id]);
 
             await connection.query(
-                'INSERT INTO StayLogs (patient_id, bed_id, transfer_reason) VALUES (?, ?, ?)',
-                [stay.patient_id, to_bed_id, reason || null]
+                'INSERT INTO StayLogs (patient_id, bed_id, transfer_reason, created_by) VALUES (?, ?, ?, ?)',
+                [stay.patient_id, to_bed_id, reason || null, userId]
             );
-            await connection.query('UPDATE Beds SET is_available = FALSE WHERE id = ?', [to_bed_id]);
+            await connection.query('UPDATE Beds SET is_available = FALSE, updated_by = ? WHERE id = ?', [userId, to_bed_id]);
 
             await connection.commit();
             connection.release();
@@ -425,6 +480,7 @@ exports.checkOut = async (req, res) => {
                 return res.json({ message: 'Bed dikosongkan (tanpa riwayat stay aktif)' });
             }
 
+            const userId = req.user?.id || null;
             const stay = activeStays[0];
             const photoPath = req.file ? `departure/${req.file.filename}` : null;
             const checkOutTimestamp = req.body.check_out_date || null;
@@ -432,32 +488,32 @@ exports.checkOut = async (req, res) => {
             // 2. Update StayLog
             if (checkOutTimestamp) {
                 await connection.query(
-                    'UPDATE StayLogs SET check_out_date = ?, final_status = ?, departure_photo_path = ? WHERE id = ?',
-                    [checkOutTimestamp, final_status, photoPath, stay.id]
+                    'UPDATE StayLogs SET check_out_date = ?, final_status = ?, departure_photo_path = ?, updated_by = ? WHERE id = ?',
+                    [checkOutTimestamp, final_status, photoPath, userId, stay.id]
                 );
             } else {
                 await connection.query(
-                    'UPDATE StayLogs SET check_out_date = CURRENT_TIMESTAMP, final_status = ?, departure_photo_path = ? WHERE id = ?',
-                    [final_status, photoPath, stay.id]
+                    'UPDATE StayLogs SET check_out_date = CURRENT_TIMESTAMP, final_status = ?, departure_photo_path = ?, updated_by = ? WHERE id = ?',
+                    [final_status, photoPath, userId, stay.id]
                 );
             }
 
             // 3. Mark Bed as Available
             await connection.query(
-                'UPDATE Beds SET is_available = TRUE WHERE id = ?',
-                [bed_id]
+                'UPDATE Beds SET is_available = TRUE, updated_by = ? WHERE id = ?',
+                [userId, bed_id]
             );
 
             // 4. Deactivate associated Visitors
             await connection.query(
-                'UPDATE Visitors SET is_active = FALSE WHERE patient_id = ?',
-                [stay.patient_id]
+                'UPDATE Visitors SET is_active = FALSE, updated_by = ? WHERE patient_id = ?',
+                [userId, stay.patient_id]
             );
 
             // 5. Update status_rumah_singgah di PatientRegistrations jadi Sudah Pulang
             await connection.query(
-                "UPDATE PatientRegistrations SET status_rumah_singgah = 'Sudah Pulang' WHERE patient_id = ?",
-                [stay.patient_id]
+                "UPDATE PatientRegistrations SET status_rumah_singgah = 'Sudah Pulang', updated_by = ? WHERE patient_id = ?",
+                [userId, stay.patient_id]
             );
 
             await connection.commit();
@@ -498,8 +554,8 @@ exports.addStayVisitor = async (req, res) => {
             return res.status(400).json({ message: 'Penunggu tidak ditemukan atau bukan milik pasien ini' });
         }
         await db.query(
-            'INSERT IGNORE INTO StayLogVisitors (stay_log_id, visitor_id) VALUES (?, ?)',
-            [stayId, visitor_id]
+            'INSERT IGNORE INTO StayLogVisitors (stay_log_id, visitor_id, created_by) VALUES (?, ?, ?)',
+            [stayId, visitor_id, req.user?.id || null]
         );
         res.json({ message: 'Penunggu berhasil ditambahkan' });
     } catch (error) {

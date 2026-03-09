@@ -93,22 +93,23 @@ exports.createLog = async (req, res) => {
         try {
             const firstPatientId = ids.length > 0 ? ids[0] : null;
 
+            const userId = req.user?.id || null;
             let result;
             if (departure_time) {
                 [result] = await connection.query(
                     `
-          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status)
-          VALUES (?, ?, ?, ?, 'In-Journey')
+          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, created_by)
+          VALUES (?, ?, ?, ?, 'In-Journey', ?)
         `,
-                    [ambulance_id, firstPatientId || null, destination, departure_time]
+                    [ambulance_id, firstPatientId || null, destination, departure_time, userId]
                 );
             } else {
                 [result] = await connection.query(
                     `
-          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status)
-          VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'In-Journey')
+          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, created_by)
+          VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'In-Journey', ?)
         `,
-                    [ambulance_id, firstPatientId || null, destination]
+                    [ambulance_id, firstPatientId || null, destination, userId]
                 );
             }
 
@@ -120,7 +121,7 @@ exports.createLog = async (req, res) => {
                     if (!pid) continue;
                     const destMap = patient_destinations || {};
                     const perPatientDest = destMap[String(pid)] || destMap[pid] || destination;
-                    
+
                     // Check if a file was uploaded for this patient
                     let documentPath = null;
                     if (req.files && Array.isArray(req.files)) {
@@ -131,15 +132,15 @@ exports.createLog = async (req, res) => {
                     }
 
                     await connection.query(
-                        'INSERT IGNORE INTO AmbulanceLogPatients (ambulance_log_id, patient_id, destination, document_path) VALUES (?, ?, ?, ?)',
-                        [logId, pid, perPatientDest || null, documentPath]
+                        'INSERT IGNORE INTO AmbulanceLogPatients (ambulance_log_id, patient_id, destination, document_path, created_by) VALUES (?, ?, ?, ?, ?)',
+                        [logId, pid, perPatientDest || null, documentPath, userId]
                     );
                 }
             }
 
             await connection.query(
-                'UPDATE Ambulances SET status = "In-Journey" WHERE id = ?',
-                [ambulance_id]
+                'UPDATE Ambulances SET status = "In-Journey", updated_by = ? WHERE id = ?',
+                [userId, ambulance_id]
             );
 
             await connection.commit();
@@ -181,31 +182,32 @@ exports.completeLog = async (req, res) => {
             }
             const log = logs[0];
 
+            const userId = req.user?.id || null;
             // Update log
             if (return_time) {
                 await connection.query(
                     `
           UPDATE AmbulanceLogs
-          SET status = 'Completed', return_time = ?
+          SET status = 'Completed', return_time = ?, updated_by = ?
           WHERE id = ?
         `,
-                    [return_time, id]
+                    [return_time, userId, id]
                 );
             } else {
                 await connection.query(
                     `
           UPDATE AmbulanceLogs
-          SET status = 'Completed', return_time = CURRENT_TIMESTAMP
+          SET status = 'Completed', return_time = CURRENT_TIMESTAMP, updated_by = ?
           WHERE id = ?
         `,
-                    [id]
+                    [userId, id]
                 );
             }
 
             // Kembalikan status ambulans menjadi Available
             await connection.query(
-                'UPDATE Ambulances SET status = "Available" WHERE id = ?',
-                [log.ambulance_id]
+                'UPDATE Ambulances SET status = "Available", updated_by = ? WHERE id = ?',
+                [userId, log.ambulance_id]
             );
 
             await connection.commit();

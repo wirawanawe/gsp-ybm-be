@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const authMiddleware = require('../config/authMiddleware');
 const visitorController = require('../controllers/visitorController');
+
+router.use(authMiddleware);
 const multer = require('multer');
 
 // Configure Multer for KTP/KK Uploads

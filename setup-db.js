@@ -29,7 +29,9 @@ async function setupDatabase() {
         email VARCHAR(255) NOT NULL UNIQUE,
         password_hash VARCHAR(255) NOT NULL,
         role ENUM('Admin YBM', 'Petugas Front Desk', 'Sistem Pengelola') NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by INT NULL,
+        updated_by INT NULL
       )
     `);
     console.log('Table Users created.');
@@ -48,7 +50,9 @@ async function setupDatabase() {
         rt_rw VARCHAR(50), kelurahan VARCHAR(100), kecamatan VARCHAR(100),
         kabupaten VARCHAR(100), provinsi VARCHAR(100),
         diagnosis TEXT, treatment_plan TEXT, occupation VARCHAR(100), income VARCHAR(100),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by INT NULL,
+        updated_by INT NULL
       )
     `);
     console.log('Table Patients created.');
@@ -63,6 +67,8 @@ async function setupDatabase() {
         status_verification ENUM('Pending', 'Layak Mustahik', 'Rujukan Lain') DEFAULT 'Pending',
         status_rumah_singgah ENUM('Menunggu', 'Dirawat', 'Sudah Pulang') DEFAULT 'Menunggu',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by INT NULL,
+        updated_by INT NULL,
         CONSTRAINT fk_pr_patient FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE,
         INDEX idx_pr_patient_reg (patient_id),
         INDEX idx_pr_reg_number (registration_number),
@@ -79,6 +85,8 @@ async function setupDatabase() {
         document_type ENUM('KTP', 'KK', 'BPJS', 'SKTM', 'Rujukan', 'Foto') NOT NULL,
         file_path VARCHAR(255) NOT NULL,
         uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by INT NULL,
+        updated_by INT NULL,
         FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE
       )
     `);
@@ -97,6 +105,8 @@ async function setupDatabase() {
         kk_path VARCHAR(255),
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by INT NULL,
+        updated_by INT NULL,
         FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE
       )
     `);
@@ -109,7 +119,9 @@ async function setupDatabase() {
         room_number VARCHAR(50) NOT NULL UNIQUE,
         floor INT NOT NULL,
         capacity INT NOT NULL,
-        description TEXT
+        description TEXT,
+        created_by INT NULL,
+        updated_by INT NULL
       )
     `);
     console.log('Table Rooms created.');
@@ -122,6 +134,8 @@ async function setupDatabase() {
         bed_number VARCHAR(50) NOT NULL,
         bed_type VARCHAR(50),
         is_available BOOLEAN DEFAULT TRUE,
+        created_by INT NULL,
+        updated_by INT NULL,
         FOREIGN KEY (room_id) REFERENCES Rooms(id) ON DELETE CASCADE
       )
     `);
@@ -133,7 +147,9 @@ async function setupDatabase() {
         id INT AUTO_INCREMENT PRIMARY KEY,
         plate_number VARCHAR(20) NOT NULL UNIQUE,
         vehicle_model VARCHAR(100) NOT NULL,
-        status ENUM('Available', 'In-Journey', 'Maintenance') DEFAULT 'Available'
+        status ENUM('Available', 'In-Journey', 'Maintenance') DEFAULT 'Available',
+        created_by INT NULL,
+        updated_by INT NULL
       )
     `);
     console.log('Table Ambulances created.');
@@ -149,6 +165,8 @@ async function setupDatabase() {
         final_status ENUM('Sembuh', 'Rujukan Lanjut', 'Meninggal', 'Transfer') NULL,
         transfer_reason TEXT NULL,
         departure_photo_path VARCHAR(255) NULL,
+        created_by INT NULL,
+        updated_by INT NULL,
         FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE,
         FOREIGN KEY (bed_id) REFERENCES Beds(id) ON DELETE SET NULL
       )
@@ -162,6 +180,8 @@ async function setupDatabase() {
         stay_log_id INT NOT NULL,
         visitor_id INT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by INT NULL,
+        updated_by INT NULL,
         FOREIGN KEY (stay_log_id) REFERENCES StayLogs(id) ON DELETE CASCADE,
         FOREIGN KEY (visitor_id) REFERENCES Visitors(id) ON DELETE CASCADE,
         UNIQUE KEY uq_stay_visitor (stay_log_id, visitor_id)
@@ -179,6 +199,8 @@ async function setupDatabase() {
         departure_time TIMESTAMP NOT NULL,
         return_time TIMESTAMP NULL,
         status ENUM('In-Journey', 'Completed', 'Cancelled') DEFAULT 'In-Journey',
+        created_by INT NULL,
+        updated_by INT NULL,
         FOREIGN KEY (ambulance_id) REFERENCES Ambulances(id) ON DELETE CASCADE,
         FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE SET NULL
       )
@@ -194,6 +216,8 @@ async function setupDatabase() {
         destination TEXT NULL,
         document_path VARCHAR(255) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by INT NULL,
+        updated_by INT NULL,
         FOREIGN KEY (ambulance_log_id) REFERENCES AmbulanceLogs(id) ON DELETE CASCADE,
         FOREIGN KEY (patient_id) REFERENCES Patients(id) ON DELETE CASCADE
       )

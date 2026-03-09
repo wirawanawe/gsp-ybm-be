@@ -166,8 +166,8 @@ exports.addPatientDocuments = async (req, res) => {
             const file = req.files[type][0];
             const docEnum = type.toUpperCase();
             await db.query(
-                'INSERT INTO Documents (patient_id, document_type, file_path) VALUES (?, ?, ?)',
-                [patientId, docEnum, file.path]
+                'INSERT INTO Documents (patient_id, document_type, file_path, created_by) VALUES (?, ?, ?, ?)',
+                [patientId, docEnum, file.path, req.user?.id || null]
             );
         }
         res.json({ message: 'Dokumen berhasil ditambahkan' });
@@ -234,22 +234,23 @@ exports.registerPatient = async (req, res) => {
             const regNum = `REG-YBM-${new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14)}`;
 
             // 1. Insert ke tabel Patients (tanpa status - ada di PatientRegistrations)
+            const userId = req.user?.id || null;
             const [patientResult] = await connection.query(
                 `INSERT INTO Patients (registration_number, name, nik, dob, gender, address, phone,
-                 rt_rw, kelurahan, kecamatan, kabupaten, provinsi, diagnosis, treatment_plan, occupation, income)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 rt_rw, kelurahan, kecamatan, kabupaten, provinsi, diagnosis, treatment_plan, occupation, income, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [regNum, name, nik, dob, gender, address, phone,
                     rt_rw || null, kelurahan || null, kecamatan || null, kabupaten || null, provinsi || null,
-                    diagnosis || null, treatment_plan || null, occupation || null, income || null]
+                    diagnosis || null, treatment_plan || null, occupation || null, income || null, userId]
             );
 
             const patientId = patientResult.insertId;
 
             // 2. Catat di PatientRegistrations (riwayat registrasi + status)
             await connection.query(
-                `INSERT INTO PatientRegistrations (patient_id, registration_number, status_mustahik, status_verification, status_rumah_singgah)
-                 VALUES (?, ?, ?, 'Pending', 'Menunggu')`,
-                [patientId, regNum, status_mustahik || 'Mustahik']
+                `INSERT INTO PatientRegistrations (patient_id, registration_number, status_mustahik, status_verification, status_rumah_singgah, created_by)
+                 VALUES (?, ?, ?, 'Pending', 'Menunggu', ?)`,
+                [patientId, regNum, status_mustahik || 'Mustahik', userId]
             );
 
             // 3. Insert ke tabel Documents (jika ada file yang diunggah)
@@ -261,8 +262,8 @@ exports.registerPatient = async (req, res) => {
                     let docEnum = type.toUpperCase();
 
                     await connection.query(
-                        `INSERT INTO Documents (patient_id, document_type, file_path) VALUES (?, ?, ?)`,
-                        [patientId, docEnum, file.path]
+                        `INSERT INTO Documents (patient_id, document_type, file_path, created_by) VALUES (?, ?, ?, ?)`,
+                        [patientId, docEnum, file.path, userId]
                     );
                 }
             }
@@ -309,10 +310,11 @@ exports.reRegister = async (req, res) => {
         const regNum = `REG-YBM-${new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14)}`;
 
         // Setiap pendaftaran ulang: status verifikasi di-reset (Pending), status_rumah_singgah selalu Menunggu (episode baru)
+        const userId = req.user?.id || null;
         await db.query(
-            `INSERT INTO PatientRegistrations (patient_id, registration_number, status_mustahik, status_verification, status_rumah_singgah)
-             VALUES (?, ?, ?, 'Pending', 'Menunggu')`,
-            [patientId, regNum, (status_mustahik && ['Mustahik', 'Non-Mustahik'].includes(status_mustahik)) ? status_mustahik : 'Mustahik']
+            `INSERT INTO PatientRegistrations (patient_id, registration_number, status_mustahik, status_verification, status_rumah_singgah, created_by)
+             VALUES (?, ?, ?, 'Pending', 'Menunggu', ?)`,
+            [patientId, regNum, (status_mustahik && ['Mustahik', 'Non-Mustahik'].includes(status_mustahik)) ? status_mustahik : 'Mustahik', userId]
         );
 
         // Opsional: update data pasien dari form (nama, alamat, dll.) tanpa menambah baris (status ada di PatientRegistrations)
@@ -330,6 +332,8 @@ exports.reRegister = async (req, res) => {
             }
         }
         if (updates.length > 0) {
+            updates.push('updated_by = ?');
+            params.push(userId);
             params.push(patientId);
             await db.query(
                 `UPDATE Patients SET ${updates.join(', ')} WHERE id = ?`,
@@ -407,6 +411,8 @@ exports.updatePatient = async (req, res) => {
         if (updates.length === 0) {
             return res.status(400).json({ message: 'Tidak ada data yang diupdate' });
         }
+        updates.push('updated_by = ?');
+        params.push(req.user?.id || null);
         params.push(id);
         await db.query(
             `UPDATE Patients SET ${updates.join(', ')} WHERE id = ?`,
@@ -446,8 +452,8 @@ exports.verifyPatient = async (req, res) => {
 
     try {
         const [result] = await db.query(
-            'UPDATE PatientRegistrations SET status_verification = ? WHERE patient_id = ?',
-            [status_verification, req.params.id]
+            'UPDATE PatientRegistrations SET status_verification = ?, updated_by = ? WHERE patient_id = ?',
+            [status_verification, req.user?.id || null, req.params.id]
         );
 
         if (result.affectedRows === 0) {

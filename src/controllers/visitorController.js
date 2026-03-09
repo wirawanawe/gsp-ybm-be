@@ -78,8 +78,8 @@ exports.createVisitor = async (req, res) => {
             );
 
             const [result] = await connection.query(
-                'INSERT INTO Visitors (patient_id, name, nik, relation, phone, ktp_path, kk_path, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)',
-                [patient_id, name, nik, relation, phone || null, ktp_path, kk_path]
+                'INSERT INTO Visitors (patient_id, name, nik, relation, phone, ktp_path, kk_path, is_active, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, ?)',
+                [patient_id, name, nik, relation, phone || null, ktp_path, kk_path, req.user?.id || null]
             );
 
             await connection.commit();
@@ -162,6 +162,8 @@ exports.updateVisitor = async (req, res) => {
         if (updates.length === 0) {
             return res.status(400).json({ message: 'Tidak ada data yang diupdate' });
         }
+        updates.push('updated_by = ?');
+        params.push(req.user?.id || null);
         params.push(id);
 
         const [result] = await db.query(

@@ -44,8 +44,8 @@ exports.createUser = async (req, res) => {
         const password_hash = await bcrypt.hash(password, 10);
 
         const [result] = await db.query(
-            'INSERT INTO Users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
-            [name, email, password_hash, role]
+            'INSERT INTO Users (name, email, password_hash, role, created_by) VALUES (?, ?, ?, ?, ?)',
+            [name, email, password_hash, role, req.user?.id || null]
         );
 
         res.status(201).json({ message: 'User berhasil dibuat', id: result.insertId });
@@ -81,8 +81,8 @@ exports.updateUser = async (req, res) => {
         }
 
         const [result] = await db.query(
-            'UPDATE Users SET name = ?, email = ?, password_hash = ?, role = ? WHERE id = ?',
-            [newName, newEmail, newPasswordHash, newRole, id]
+            'UPDATE Users SET name = ?, email = ?, password_hash = ?, role = ?, updated_by = ? WHERE id = ?',
+            [newName, newEmail, newPasswordHash, newRole, req.user?.id || null, id]
         );
 
         if (result.affectedRows === 0) {

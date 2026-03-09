@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
+const authMiddleware = require('../config/authMiddleware');
 const ambulanceController = require('../controllers/ambulanceController');
 const ambulanceLogController = require('../controllers/ambulanceLogController');
+
+router.use(authMiddleware);
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
