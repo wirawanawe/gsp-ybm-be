@@ -65,6 +65,9 @@ const ambulanceRoutes = require('./routes/ambulance');
 const userRoutes = require('./routes/users');
 const visitorRoutes = require('./routes/visitors');
 const reportRoutes = require('./routes/reports');
+const activityRoutes = require('./routes/activities');
+const healthRoutes = require('./routes/health');
+const financeRoutes = require('./routes/finance');
 // const stayRoutes = require('./routes/stays');
 
 app.use('/api/auth', authRoutes);
@@ -74,6 +77,9 @@ app.use('/api/ambulance', ambulanceRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/visitors', visitorRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/activities', activityRoutes);
+app.use('/api/health', healthRoutes);
+app.use('/api/finance', financeRoutes);
 // app.use('/api/stays', stayRoutes);
 
 app.get('/', (req, res) => {

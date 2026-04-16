@@ -12,5 +12,8 @@ router.get('/patient-in-out/export', reportController.exportPatientInOut);
 router.get('/ambulance-usage', reportController.getAmbulanceUsage);
 router.get('/ambulance-usage/export', reportController.exportAmbulanceUsage);
 
+// Dashboard summary
+router.get('/dashboard-summary', reportController.getDashboardSummary);
+
 module.exports = router;
 

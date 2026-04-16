@@ -314,4 +314,68 @@ exports.exportAmbulanceUsage = async (req, res) => {
         res.status(500).json({ message: 'Gagal mengekspor laporan ambulans' });
     }
 };
+// GET /api/reports/dashboard-summary
+// Ringkasan untuk dashboard: jumlah pasien, ketersediaan kamar, status ambulans
+exports.getDashboardSummary = async (req, res) => {
+    try {
+        // Pasien aktif (masih dirawat)
+        const [[{ active_patients }]] = await db.query(
+            "SELECT COUNT(DISTINCT patient_id) AS active_patients FROM StayLogs WHERE final_status IS NULL"
+        );
+        // Total pasien terdaftar
+        const [[{ total_patients }]] = await db.query(
+            "SELECT COUNT(*) AS total_patients FROM Patients"
+        );
+        // Pasien pending verifikasi
+        const [[{ pending_patients }]] = await db.query(
+            "SELECT COUNT(*) AS pending_patients FROM PatientRegistrations WHERE status_verification = 'Pending'"
+        );
+
+        // Kamar: total beds & yang tersedia
+        const [[{ total_beds }]] = await db.query(
+            "SELECT COUNT(*) AS total_beds FROM Beds"
+        );
+        const [[{ available_beds }]] = await db.query(
+            "SELECT COUNT(*) AS available_beds FROM Beds WHERE is_available = 1"
+        );
+        const [[{ total_rooms }]] = await db.query(
+            "SELECT COUNT(*) AS total_rooms FROM Rooms"
+        );
+
+        // Ambulans per status
+        const [ambulanceStatus] = await db.query(
+            "SELECT status, COUNT(*) AS count FROM Ambulances GROUP BY status"
+        );
+        const ambulanceSummary = { Available: 0, 'In-Journey': 0, Maintenance: 0 };
+        for (const row of ambulanceStatus) {
+            ambulanceSummary[row.status] = Number(row.count);
+        }
+        const [[{ total_ambulances }]] = await db.query(
+            "SELECT COUNT(*) AS total_ambulances FROM Ambulances"
+        );
+
+        res.json({
+            patients: {
+                active: Number(active_patients),
+                total: Number(total_patients),
+                pending: Number(pending_patients),
+            },
+            rooms: {
+                total_rooms: Number(total_rooms),
+                total_beds: Number(total_beds),
+                available_beds: Number(available_beds),
+                occupied_beds: Number(total_beds) - Number(available_beds),
+            },
+            ambulances: {
+                total: Number(total_ambulances),
+                available: ambulanceSummary['Available'],
+                in_journey: ambulanceSummary['In-Journey'],
+                maintenance: ambulanceSummary['Maintenance'],
+            },
+        });
+    } catch (error) {
+        console.error('getDashboardSummary error:', error);
+        res.status(500).json({ message: 'Gagal mengambil ringkasan dashboard' });
+    }
+};
 
