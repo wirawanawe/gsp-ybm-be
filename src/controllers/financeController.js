@@ -24,16 +24,16 @@ exports.getIncome = async (req, res) => {
 /** POST /api/finance/income */
 exports.createIncome = async (req, res) => {
     try {
-        const { income_date, source, category, amount, description, receipt_number } = req.body;
+        const { income_date, source, category, amount, description, receipt_number, person_in_charge } = req.body;
         if (!income_date || !source || !amount) {
             return res.status(400).json({ message: 'income_date, source, dan amount wajib diisi' });
         }
         const [result] = await db.query(
             `INSERT INTO FinanceIncome
-             (income_date, source, category, amount, description, receipt_number, created_by)
-             VALUES (?,?,?,?,?,?,?)`,
+             (income_date, source, category, amount, description, receipt_number, person_in_charge, created_by)
+             VALUES (?,?,?,?,?,?,?,?)`,
             [income_date, source, category || 'Lainnya', amount,
-             description || null, receipt_number || null, req.user?.id || null]
+             description || null, receipt_number || null, person_in_charge || null, req.user?.id || null]
         );
         const [rows] = await db.query('SELECT * FROM FinanceIncome WHERE id = ?', [result.insertId]);
         res.status(201).json(rows[0]);
@@ -47,14 +47,14 @@ exports.createIncome = async (req, res) => {
 exports.updateIncome = async (req, res) => {
     try {
         const { id } = req.params;
-        const { income_date, source, category, amount, description, receipt_number } = req.body;
+        const { income_date, source, category, amount, description, receipt_number, person_in_charge } = req.body;
         const [check] = await db.query('SELECT id FROM FinanceIncome WHERE id = ?', [id]);
         if (!check.length) return res.status(404).json({ message: 'Data tidak ditemukan' });
         await db.query(
             `UPDATE FinanceIncome SET
-             income_date=?, source=?, category=?, amount=?, description=?, receipt_number=?, updated_by=?
+             income_date=?, source=?, category=?, amount=?, description=?, receipt_number=?, person_in_charge=?, updated_by=?
              WHERE id=?`,
-            [income_date, source, category, amount, description || null, receipt_number || null, req.user?.id || null, id]
+            [income_date, source, category, amount, description || null, receipt_number || null, person_in_charge || null, req.user?.id || null, id]
         );
         const [rows] = await db.query('SELECT * FROM FinanceIncome WHERE id = ?', [id]);
         res.json(rows[0]);
@@ -100,16 +100,16 @@ exports.getExpenses = async (req, res) => {
 /** POST /api/finance/expenses */
 exports.createExpense = async (req, res) => {
     try {
-        const { expense_date, category, description, amount, payment_method, receipt_number } = req.body;
+        const { expense_date, category, description, amount, payment_method, receipt_number, person_in_charge } = req.body;
         if (!expense_date || !description || !amount) {
             return res.status(400).json({ message: 'expense_date, description, dan amount wajib diisi' });
         }
         const [result] = await db.query(
             `INSERT INTO FinanceExpenses
-             (expense_date, category, description, amount, payment_method, receipt_number, created_by)
-             VALUES (?,?,?,?,?,?,?)`,
+             (expense_date, category, description, amount, payment_method, receipt_number, person_in_charge, created_by)
+             VALUES (?,?,?,?,?,?,?,?)`,
             [expense_date, category || 'Lainnya', description, amount,
-             payment_method || 'Tunai', receipt_number || null, req.user?.id || null]
+             payment_method || 'Tunai', receipt_number || null, person_in_charge || null, req.user?.id || null]
         );
         const [rows] = await db.query('SELECT * FROM FinanceExpenses WHERE id = ?', [result.insertId]);
         res.status(201).json(rows[0]);
@@ -123,16 +123,16 @@ exports.createExpense = async (req, res) => {
 exports.updateExpense = async (req, res) => {
     try {
         const { id } = req.params;
-        const { expense_date, category, description, amount, payment_method, receipt_number } = req.body;
+        const { expense_date, category, description, amount, payment_method, receipt_number, person_in_charge } = req.body;
         const [check] = await db.query('SELECT id FROM FinanceExpenses WHERE id = ?', [id]);
         if (!check.length) return res.status(404).json({ message: 'Data tidak ditemukan' });
         await db.query(
             `UPDATE FinanceExpenses SET
              expense_date=?, category=?, description=?, amount=?,
-             payment_method=?, receipt_number=?, updated_by=?
+             payment_method=?, receipt_number=?, person_in_charge=?, updated_by=?
              WHERE id=?`,
             [expense_date, category, description, amount,
-             payment_method, receipt_number || null, req.user?.id || null, id]
+             payment_method, receipt_number || null, person_in_charge || null, req.user?.id || null, id]
         );
         const [rows] = await db.query('SELECT * FROM FinanceExpenses WHERE id = ?', [id]);
         res.json(rows[0]);
@@ -216,13 +216,13 @@ exports.getReport = async (req, res) => {
         // Recent transactions (income + expense merged, sorted by date)
         const [incomeList] = await db.query(
             `SELECT 'income' AS type, income_date AS trx_date, source AS description,
-             category, amount, receipt_number FROM FinanceIncome WHERE ${incomeWhere}
+             category, amount, receipt_number, person_in_charge FROM FinanceIncome WHERE ${incomeWhere}
              ORDER BY income_date DESC LIMIT 200`,
             iParams
         );
         const [expenseList] = await db.query(
             `SELECT 'expense' AS type, expense_date AS trx_date, description,
-             category, amount, receipt_number FROM FinanceExpenses WHERE ${expenseWhere}
+             category, amount, receipt_number, person_in_charge FROM FinanceExpenses WHERE ${expenseWhere}
              ORDER BY expense_date DESC LIMIT 200`,
             eParams
         );

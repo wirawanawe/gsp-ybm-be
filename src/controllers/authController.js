@@ -24,9 +24,20 @@ exports.login = async (req, res) => {
             return res.status(401).json({ message: 'Email atau password salah' });
         }
 
+        let accessible_menus = [];
+        try {
+            const [roles] = await db.query('SELECT accessible_menus FROM Roles WHERE name = ?', [user.role]);
+            if (roles.length > 0) {
+                const menusStr = roles[0].accessible_menus;
+                accessible_menus = typeof menusStr === 'string' ? JSON.parse(menusStr) : menusStr;
+            }
+        } catch (e) {
+            console.error('Failed fetching role menus', e);
+        }
+
         // Generate JWT
         const token = jwt.sign(
-            { id: user.id, role: user.role },
+            { id: user.id, role: user.role, accessible_menus },
             process.env.JWT_SECRET || 'super_secret_jwt_key_ybm',
             { expiresIn: '1d' }
         );
@@ -38,7 +49,8 @@ exports.login = async (req, res) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
-                role: user.role
+                role: user.role,
+                accessible_menus
             }
         });
     } catch (error) {
