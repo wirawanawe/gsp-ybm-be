@@ -59,7 +59,7 @@ exports.getLogs = async (req, res) => {
 // POST /api/ambulance/logs
 // Mendukung lebih dari satu pasien per booking melalui patient_ids (array)
 exports.createLog = async (req, res) => {
-    let { ambulance_id, patient_id, patient_ids, destination, patient_destinations, departure_time } = req.body;
+    let { ambulance_id, patient_id, patient_ids, destination, patient_destinations, departure_time, km_start, driver_name } = req.body;
 
     // Parse array/object fields if they are sent as strings via FormData
     try {
@@ -98,18 +98,18 @@ exports.createLog = async (req, res) => {
             if (departure_time) {
                 [result] = await connection.query(
                     `
-          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, created_by)
-          VALUES (?, ?, ?, ?, 'In-Journey', ?)
+          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, km_start, driver_name, created_by)
+          VALUES (?, ?, ?, ?, 'In-Journey', ?, ?, ?)
         `,
-                    [ambulance_id, firstPatientId || null, destination, departure_time, userId]
+                    [ambulance_id, firstPatientId || null, destination, departure_time, km_start || 0, driver_name || null, userId]
                 );
             } else {
                 [result] = await connection.query(
                     `
-          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, created_by)
-          VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'In-Journey', ?)
+          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, km_start, driver_name, created_by)
+          VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'In-Journey', ?, ?, ?)
         `,
-                    [ambulance_id, firstPatientId || null, destination, userId]
+                    [ambulance_id, firstPatientId || null, destination, km_start || 0, driver_name || null, userId]
                 );
             }
 
@@ -165,7 +165,7 @@ exports.createLog = async (req, res) => {
 // PUT /api/ambulance/logs/:id/complete
 exports.completeLog = async (req, res) => {
     const { id } = req.params;
-    const { return_time } = req.body;
+    const { return_time, km_end, fuel_cost } = req.body;
 
     try {
         const connection = await db.getConnection();
@@ -188,19 +188,19 @@ exports.completeLog = async (req, res) => {
                 await connection.query(
                     `
           UPDATE AmbulanceLogs
-          SET status = 'Completed', return_time = ?, updated_by = ?
+          SET status = 'Completed', return_time = ?, km_end = ?, fuel_cost = ?, updated_by = ?
           WHERE id = ?
         `,
-                    [return_time, userId, id]
+                    [return_time, km_end || 0, fuel_cost || 0, userId, id]
                 );
             } else {
                 await connection.query(
                     `
           UPDATE AmbulanceLogs
-          SET status = 'Completed', return_time = CURRENT_TIMESTAMP, updated_by = ?
+          SET status = 'Completed', return_time = CURRENT_TIMESTAMP, km_end = ?, fuel_cost = ?, updated_by = ?
           WHERE id = ?
         `,
-                    [userId, id]
+                    [km_end || 0, fuel_cost || 0, userId, id]
                 );
             }
 

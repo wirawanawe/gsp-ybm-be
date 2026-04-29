@@ -69,6 +69,10 @@ const reportRoutes = require('./routes/reports');
 const activityRoutes = require('./routes/activities');
 const healthRoutes = require('./routes/health');
 const financeRoutes = require('./routes/finance');
+const documentationRoutes = require('./routes/documentation');
+const heroSliderRoutes = require('./routes/heroSliders');
+
+
 // const stayRoutes = require('./routes/stays');
 
 app.use('/api/auth', authRoutes);
@@ -82,6 +86,10 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/activities', activityRoutes);
 app.use('/api/health', healthRoutes);
 app.use('/api/finance', financeRoutes);
+app.use('/api/documentation', documentationRoutes);
+app.use('/api/hero-sliders', heroSliderRoutes);
+
+
 // app.use('/api/stays', stayRoutes);
 
 app.get('/', (req, res) => {

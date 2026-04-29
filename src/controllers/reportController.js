@@ -168,7 +168,8 @@ exports.exportPatientInOut = async (req, res) => {
             `SELECT 
                 s.id, s.patient_id, s.bed_id, s.check_in_date, s.check_out_date, s.final_status,
                 s.departure_photo_path, s.transfer_reason,
-                p.name AS patient_name, p.registration_number, p.nik,
+                p.name AS patient_name, p.registration_number, p.nik, p.dob, p.gender, p.phone, p.address,
+                p.rt_rw, p.kelurahan, p.kecamatan, p.kabupaten, p.provinsi, p.diagnosis, p.occupation, p.income,
                 b.bed_number, r.room_number
              FROM StayLogs s
              JOIN Patients p ON p.id = s.patient_id
@@ -179,47 +180,141 @@ exports.exportPatientInOut = async (req, res) => {
             params
         );
 
+        // Fetch visitors for these stay logs
+        const stayIds = rows.map(r => r.id);
+        let visitorsMap = {};
+        if (stayIds.length > 0) {
+            const [vRows] = await db.query(
+                `SELECT slv.stay_log_id, v.name, v.nik, v.relation, v.phone
+                 FROM StayLogVisitors slv
+                 JOIN Visitors v ON v.id = slv.visitor_id
+                 WHERE slv.stay_log_id IN (?)`,
+                [stayIds]
+            );
+            vRows.forEach(v => {
+                if (!visitorsMap[v.stay_log_id]) visitorsMap[v.stay_log_id] = [];
+                visitorsMap[v.stay_log_id].push(v);
+            });
+        }
+
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('Laporan Pasien');
 
         sheet.columns = [
             { header: 'No', key: 'no', width: 6 },
-            { header: 'Nama Pasien', key: 'patient_name', width: 28 },
-            { header: 'No Registrasi', key: 'registration_number', width: 22 },
-            { header: 'NIK', key: 'nik', width: 20 },
-            { header: 'Kamar', key: 'room_number', width: 10 },
-            { header: 'Bed', key: 'bed_number', width: 8 },
-            { header: 'Waktu Masuk', key: 'check_in_date', width: 22 },
-            { header: 'Waktu Keluar', key: 'check_out_date', width: 22 },
-            { header: 'Status Akhir', key: 'final_status', width: 18 },
-            { header: 'Deskripsi', key: 'deskripsi', width: 35 }
+            { header: 'NIK', key: 'nik', width: 22 },
+            { header: 'Nama Penerima Manfaat', key: 'name', width: 28 },
+            { header: 'Nomor Handphone', key: 'phone', width: 18 },
+            { header: 'Alamat', key: 'address', width: 35 },
+            { header: 'Kelurahan', key: 'kelurahan', width: 18 },
+            { header: 'Kecamatan', key: 'kecamatan', width: 18 },
+            { header: 'Kota/Kabupaten', key: 'kabupaten', width: 18 },
+            { header: 'Provinsi', key: 'provinsi', width: 18 },
+            { header: 'Penghuni', key: 'penghuni', width: 12 },
+            { header: 'Jenis Kelamin', key: 'gender', width: 12 },
+            { header: 'Tanggal Lahir', key: 'dob', width: 15 },
+            { header: 'Umur', key: 'age_cat', width: 12 },
+            { header: 'Pendidikan', key: 'education', width: 15 },
+            { header: 'Pekerjaan', key: 'occupation', width: 20 },
+            { header: 'Jenis Penyakit', key: 'diagnosis', width: 30 },
+            { header: 'Kategori Penyakit', key: 'diag_cat', width: 18 },
+            { header: 'Status', key: 'status', width: 15 },
+            { header: 'Tanggal Check In', key: 'check_in', width: 20 },
+            { header: 'Tanggal Check Out', key: 'check_out', width: 20 }
         ];
 
-        rows.forEach((row, index) => {
-            let deskripsi = '';
-            if (row.final_status === 'Transfer') {
-                deskripsi = row.transfer_reason || '-';
-            } else if ((row.final_status === 'Rujukan Lanjut' || row.final_status === 'Sembuh' || row.final_status === 'Meninggal') && row.departure_photo_path) {
-                deskripsi = 'Dokumen Kepulangan: ' + row.departure_photo_path;
-            }
+        const getAgeCategory = (dob) => {
+            if (!dob) return '-';
+            const birthDate = new Date(dob);
+            const today = new Date();
+            let age = today.getFullYear() - birthDate.getFullYear();
+            const m = today.getMonth() - birthDate.getMonth();
+            if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
+            if (age < 18) return 'Anak Anak';
+            if (age >= 60) return 'Lansia';
+            return 'Dewasa';
+        };
+
+        const getDiseaseCategory = (diagnosis) => {
+            if (!diagnosis) return 'Non Kanker';
+            const d = diagnosis.toLowerCase();
+            const keywords = ['kanker', 'cancer', 'tumor', 'ca ', 'carcinoma', 'melanoma', 'sarcoma', 'limfoma', 'leukemia'];
+            if (keywords.some(k => d.includes(k))) return 'Kanker';
+            return 'Non Kanker';
+        };
+
+        let currentNo = 1;
+        rows.forEach((row) => {
+            // Add Patient Row
             sheet.addRow({
-                no: index + 1,
-                patient_name: row.patient_name,
-                registration_number: row.registration_number,
+                no: currentNo++,
                 nik: row.nik,
-                room_number: row.room_number || '',
-                bed_number: row.bed_number || '',
-                check_in_date: row.check_in_date ? new Date(row.check_in_date) : null,
-                check_out_date: row.check_out_date ? new Date(row.check_out_date) : null,
-                final_status: row.final_status || 'Masih dirawat',
-                deskripsi
+                name: row.patient_name,
+                phone: row.phone || '-',
+                address: row.address || '-',
+                kelurahan: row.kelurahan || '-',
+                kecamatan: row.kecamatan || '-',
+                kabupaten: row.kabupaten || '-',
+                provinsi: row.provinsi || '-',
+                penghuni: 'Pasien',
+                gender: row.gender || '-',
+                dob: row.dob ? new Date(row.dob).toLocaleDateString('id-ID') : '-',
+                age_cat: getAgeCategory(row.dob),
+                education: '-', // Not in DB
+                occupation: row.occupation || '-',
+                diagnosis: row.diagnosis || '-',
+                diag_cat: getDiseaseCategory(row.diagnosis),
+                status: row.final_status ? 'Checked Out' : 'Masih dirawat',
+                check_in: row.check_in_date ? new Date(row.check_in_date) : null,
+                check_out: row.check_out_date ? new Date(row.check_out_date) : null
+            });
+
+            // Add Visitor Rows
+            const visitors = visitorsMap[row.id] || [];
+            visitors.forEach(v => {
+                sheet.addRow({
+                    no: currentNo++,
+                    nik: v.nik,
+                    name: v.name,
+                    phone: v.phone || '-',
+                    address: row.address || '-', // Default to patient's address
+                    kelurahan: row.kelurahan || '-',
+                    kecamatan: row.kecamatan || '-',
+                    kabupaten: row.kabupaten || '-',
+                    provinsi: row.provinsi || '-',
+                    penghuni: 'Pendamping',
+                    gender: '-', // Not in DB for visitors
+                    dob: '-', // Not in DB for visitors
+                    age_cat: '-',
+                    education: '-',
+                    occupation: '-',
+                    diagnosis: '-',
+                    diag_cat: '-',
+                    status: row.final_status ? 'Checked Out' : 'Masih dirawat',
+                    check_in: row.check_in_date ? new Date(row.check_in_date) : null,
+                    check_out: row.check_out_date ? new Date(row.check_out_date) : null
+                });
             });
         });
 
         sheet.getRow(1).font = { bold: true };
         sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
-        sheet.getColumn('check_in_date').numFmt = 'dd-mmm-yyyy hh:mm';
-        sheet.getColumn('check_out_date').numFmt = 'dd-mmm-yyyy hh:mm';
+        sheet.getColumn('check_in').numFmt = 'dd/mm/yy';
+        sheet.getColumn('check_out').numFmt = 'dd/mm/yy';
+
+        // Apply stripes or colors if needed, but basic matching columns is priority
+        sheet.eachRow((row, rowNumber) => {
+            if (rowNumber > 1) {
+                const penghuni = row.getCell('penghuni').value;
+                if (penghuni === 'Pasien') {
+                    row.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'FFFFF00' } // Yellow like in screenshot
+                    };
+                }
+            }
+        });
 
         res.setHeader(
             'Content-Type',
@@ -242,26 +337,38 @@ exports.exportPatientInOut = async (req, res) => {
 // GET /api/reports/ambulance-usage/export?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
 exports.exportAmbulanceUsage = async (req, res) => {
     const { date, start_date, end_date } = req.query;
-    const today = new Date().toISOString().slice(0, 10);
-
-    let from = start_date || date || today;
-    let to = end_date || date || today;
+    let from = start_date || date || '';
+    let to = end_date || date || '';
     if (from && !to) to = from;
     if (to && !from) from = to;
 
     try {
+        const hasDate = from && to;
         const [rows] = await db.query(
             `SELECT 
                 al.id, al.ambulance_id, al.destination, al.departure_time, al.return_time, al.status,
+                al.km_start, al.km_end, al.driver_name, al.fuel_cost,
                 a.plate_number, a.vehicle_model,
                 p.name AS patient_name, p.registration_number
              FROM AmbulanceLogs al
              JOIN Ambulances a ON a.id = al.ambulance_id
              LEFT JOIN Patients p ON p.id = al.patient_id
-             WHERE DATE(al.departure_time) BETWEEN ? AND ?
+             ${hasDate ? 'WHERE DATE(al.departure_time) BETWEEN ? AND ?' : ''}
              ORDER BY al.departure_time DESC`,
-            [from, to]
+            hasDate ? [from, to] : []
         );
+
+        // Fetch documentation (patient logs) for these logs
+        for (const row of rows) {
+            const [patients] = await db.query(
+                `SELECT p.name, p.registration_number, alp.document_path 
+                 FROM AmbulanceLogPatients alp 
+                 JOIN Patients p ON p.id = alp.patient_id 
+                 WHERE alp.ambulance_log_id = ?`,
+                [row.id]
+            );
+            row.documentation = patients;
+        }
 
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('Laporan Ambulans');
@@ -270,41 +377,51 @@ exports.exportAmbulanceUsage = async (req, res) => {
             { header: 'No', key: 'no', width: 6 },
             { header: 'No Polisi', key: 'plate_number', width: 16 },
             { header: 'Kendaraan', key: 'vehicle_model', width: 22 },
+            { header: 'Driver', key: 'driver', width: 20 },
             { header: 'Tujuan', key: 'destination', width: 30 },
             { header: 'Nama Pasien', key: 'patient_name', width: 26 },
             { header: 'No Registrasi', key: 'registration_number', width: 20 },
-            { header: 'Berangkat', key: 'departure_time', width: 22 },
-            { header: 'Kembali', key: 'return_time', width: 22 },
-            { header: 'Status', key: 'status', width: 14 }
+            { header: 'Kondisi BBM', key: 'fuel', width: 15 },
+            { header: 'Berangkat', key: 'departure', width: 20 },
+            { header: 'Kembali', key: 'return', width: 20 },
+            { header: 'KM Berangkat', key: 'km_start', width: 15 },
+            { header: 'KM Pulang', key: 'km_end', width: 15 },
+            { header: 'Status', key: 'status', width: 15 },
+            { header: 'Dokumentasi', key: 'docs', width: 25 }
         ];
 
         rows.forEach((row, index) => {
+            const docsList = row.documentation?.map(d => d.document_path ? 'Ada' : 'Tidak Ada').join(', ') || '-';
+            
             sheet.addRow({
                 no: index + 1,
                 plate_number: row.plate_number,
                 vehicle_model: row.vehicle_model,
+                driver: row.driver_name || '-',
                 destination: row.destination,
-                patient_name: row.patient_name || '',
-                registration_number: row.registration_number || '',
-                // objek Date supaya jam ditampilkan
-                departure_time: row.departure_time ? new Date(row.departure_time) : null,
-                return_time: row.return_time ? new Date(row.return_time) : null,
-                status: row.status === 'In-Journey' ? 'Dalam Perjalanan' : row.status
+                patient_name: row.patient_name || '-',
+                registration_number: row.registration_number || '-',
+                fuel: row.fuel_cost || 0,
+                departure: row.departure_time ? new Date(row.departure_time).toLocaleString('id-ID') : '-',
+                return: row.return_time ? new Date(row.return_time).toLocaleString('id-ID') : '-',
+                km_start: row.km_start || 0,
+                km_end: row.km_end || 0,
+                status: row.status === 'In-Journey' ? 'Dalam Perjalanan' : (row.status === 'Completed' ? 'Selesai' : row.status),
+                docs: docsList
             });
         });
 
         sheet.getRow(1).font = { bold: true };
         sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
-        sheet.getColumn('departure_time').numFmt = 'dd-mmm-yyyy hh:mm';
-        sheet.getColumn('return_time').numFmt = 'dd-mmm-yyyy hh:mm';
-
+        
         res.setHeader(
             'Content-Type',
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         );
+        const fileLabel = from && to ? `${from}_sampai_${to}` : 'semua-data';
         res.setHeader(
             'Content-Disposition',
-            `attachment; filename="laporan-ambulans-${from}_sampai_${to}.xlsx"`
+            `attachment; filename="laporan-ambulans-${fileLabel}.xlsx"`
         );
 
         await workbook.xlsx.write(res);
