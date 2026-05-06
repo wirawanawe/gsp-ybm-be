@@ -30,7 +30,12 @@ const isValidNIK = (nik) => /^\d{16}$/.test(String(nik || '').trim());
 // POST /api/visitors
 // Mendukung registrasi lengkap (dengan KTP/KK) atau sederhana (hanya NIK, Nama, No HP, Hubungan)
 exports.createVisitor = async (req, res) => {
-    const { patient_id, name, nik, relation, phone } = req.body;
+    const { 
+        patient_id, name, nik, relation, phone,
+        gender, dob, age, age_category, education,
+        address, rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
+        occupation, income
+    } = req.body;
 
     if (!isValidNIK(nik)) {
         return res.status(400).json({ message: 'NIK harus tepat 16 digit angka sesuai KTP' });
@@ -78,8 +83,16 @@ exports.createVisitor = async (req, res) => {
             );
 
             const [result] = await connection.query(
-                'INSERT INTO Visitors (patient_id, name, nik, relation, phone, ktp_path, kk_path, is_active, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, ?)',
-                [patient_id, name, nik, relation, phone || null, ktp_path, kk_path, req.user?.id || null]
+                `INSERT INTO Visitors (
+                    patient_id, name, nik, relation, phone, gender, dob, age, age_category, education,
+                    address, rt_rw, kelurahan, kecamatan, kabupaten, provinsi, occupation, income,
+                    ktp_path, kk_path, is_active, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)`,
+                [
+                    patient_id, name, nik, relation, phone || null, gender || null, dob || null, age || null, age_category || null, education || null,
+                    address || null, rt_rw || null, kelurahan || null, kecamatan || null, kabupaten || null, provinsi || null, occupation || null, income || null,
+                    ktp_path, kk_path, req.user?.id || null
+                ]
             );
 
             await connection.commit();
@@ -100,7 +113,12 @@ exports.createVisitor = async (req, res) => {
 // Update data penunggu dan (opsional) ganti berkas KTP/KK
 exports.updateVisitor = async (req, res) => {
     const { id } = req.params;
-    const { name, nik, relation, phone } = req.body;
+    const { 
+        name, nik, relation, phone,
+        gender, dob, age, age_category, education,
+        address, rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
+        occupation, income
+    } = req.body;
 
     if (nik && !isValidNIK(nik)) {
         return res.status(400).json({ message: 'NIK harus tepat 16 digit angka sesuai KTP' });
@@ -140,7 +158,12 @@ exports.updateVisitor = async (req, res) => {
         const updates = [];
         const params = [];
 
-        const fields = { name, nik, relation, phone };
+        const fields = { 
+            name, nik, relation, phone,
+            gender, dob, age, age_category, education,
+            address, rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
+            occupation, income
+        };
         for (const [key, value] of Object.entries(fields)) {
             if (value !== undefined) {
                 updates.push(`${key} = ?`);

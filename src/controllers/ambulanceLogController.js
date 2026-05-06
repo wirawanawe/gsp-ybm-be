@@ -59,7 +59,7 @@ exports.getLogs = async (req, res) => {
 // POST /api/ambulance/logs
 // Mendukung lebih dari satu pasien per booking melalui patient_ids (array)
 exports.createLog = async (req, res) => {
-    let { ambulance_id, patient_id, patient_ids, destination, patient_destinations, departure_time, km_start, driver_name } = req.body;
+    let { ambulance_id, patient_id, patient_ids, destination, patient_destinations, departure_time, km_start, driver_name, fuel_condition, fuel_filled } = req.body;
 
     // Parse array/object fields if they are sent as strings via FormData
     try {
@@ -98,18 +98,18 @@ exports.createLog = async (req, res) => {
             if (departure_time) {
                 [result] = await connection.query(
                     `
-          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, km_start, driver_name, created_by)
-          VALUES (?, ?, ?, ?, 'In-Journey', ?, ?, ?)
+          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, km_start, driver_name, fuel_condition, fuel_filled, created_by)
+          VALUES (?, ?, ?, ?, 'In-Journey', ?, ?, ?, ?, ?)
         `,
-                    [ambulance_id, firstPatientId || null, destination, departure_time, km_start || 0, driver_name || null, userId]
+                    [ambulance_id, firstPatientId || null, destination, departure_time, km_start || 0, driver_name || null, fuel_condition || null, fuel_filled || null, userId]
                 );
             } else {
                 [result] = await connection.query(
                     `
-          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, km_start, driver_name, created_by)
-          VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'In-Journey', ?, ?, ?)
+          INSERT INTO AmbulanceLogs (ambulance_id, patient_id, destination, departure_time, status, km_start, driver_name, fuel_condition, fuel_filled, created_by)
+          VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'In-Journey', ?, ?, ?, ?, ?)
         `,
-                    [ambulance_id, firstPatientId || null, destination, km_start || 0, driver_name || null, userId]
+                    [ambulance_id, firstPatientId || null, destination, km_start || 0, driver_name || null, fuel_condition || null, fuel_filled || null, userId]
                 );
             }
 

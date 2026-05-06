@@ -170,6 +170,7 @@ exports.exportPatientInOut = async (req, res) => {
                 s.departure_photo_path, s.transfer_reason,
                 p.name AS patient_name, p.registration_number, p.nik, p.dob, p.gender, p.phone, p.address,
                 p.rt_rw, p.kelurahan, p.kecamatan, p.kabupaten, p.provinsi, p.diagnosis, p.occupation, p.income,
+                p.age_category, p.education, p.disease_category,
                 b.bed_number, r.room_number
              FROM StayLogs s
              JOIN Patients p ON p.id = s.patient_id
@@ -185,7 +186,9 @@ exports.exportPatientInOut = async (req, res) => {
         let visitorsMap = {};
         if (stayIds.length > 0) {
             const [vRows] = await db.query(
-                `SELECT slv.stay_log_id, v.name, v.nik, v.relation, v.phone
+                `SELECT slv.stay_log_id, v.name, v.nik, v.relation, v.phone, v.gender, v.dob, 
+                        v.age_category, v.education, v.occupation, v.address, v.rt_rw, v.kelurahan, 
+                        v.kecamatan, v.kabupaten, v.provinsi
                  FROM StayLogVisitors slv
                  JOIN Visitors v ON v.id = slv.visitor_id
                  WHERE slv.stay_log_id IN (?)`,
@@ -201,120 +204,238 @@ exports.exportPatientInOut = async (req, res) => {
         const sheet = workbook.addWorksheet('Laporan Pasien');
 
         sheet.columns = [
+            // PASIEN (20 cols: 1-20 / A-T)
             { header: 'No', key: 'no', width: 6 },
-            { header: 'NIK', key: 'nik', width: 22 },
-            { header: 'Nama Penerima Manfaat', key: 'name', width: 28 },
-            { header: 'Nomor Handphone', key: 'phone', width: 18 },
-            { header: 'Alamat', key: 'address', width: 35 },
-            { header: 'Kelurahan', key: 'kelurahan', width: 18 },
-            { header: 'Kecamatan', key: 'kecamatan', width: 18 },
-            { header: 'Kota/Kabupaten', key: 'kabupaten', width: 18 },
-            { header: 'Provinsi', key: 'provinsi', width: 18 },
-            { header: 'Penghuni', key: 'penghuni', width: 12 },
-            { header: 'Jenis Kelamin', key: 'gender', width: 12 },
-            { header: 'Tanggal Lahir', key: 'dob', width: 15 },
-            { header: 'Umur', key: 'age_cat', width: 12 },
-            { header: 'Pendidikan', key: 'education', width: 15 },
-            { header: 'Pekerjaan', key: 'occupation', width: 20 },
-            { header: 'Jenis Penyakit', key: 'diagnosis', width: 30 },
-            { header: 'Kategori Penyakit', key: 'diag_cat', width: 18 },
-            { header: 'Status', key: 'status', width: 15 },
-            { header: 'Tanggal Check In', key: 'check_in', width: 20 },
-            { header: 'Tanggal Check Out', key: 'check_out', width: 20 }
+            { header: 'NIK (No. KTP)', key: 'p_nik', width: 20 },
+            { header: 'Nama Pasien / Mustahik', key: 'p_name', width: 25 },
+            { header: 'Nama Ibu Kandung', key: 'p_ibu', width: 20 },
+            { header: 'Jenis Kelamin', key: 'p_gender', width: 15 },
+            { header: 'Tempat, Tanggal Lahir', key: 'p_dob', width: 20 },
+            { header: 'Usia (Tahun)', key: 'p_age', width: 12 },
+            { header: 'Alamat Lengkap', key: 'p_address', width: 30 },
+            { header: 'RT/RW', key: 'p_rtrw', width: 10 },
+            { header: 'Kelurahan/Desa', key: 'p_kelurahan', width: 18 },
+            { header: 'Kecamatan', key: 'p_kecamatan', width: 18 },
+            { header: 'Kab/Kota', key: 'p_kabupaten', width: 18 },
+            { header: 'Provinsi', key: 'p_provinsi', width: 18 },
+            { header: 'No HP/Telepon', key: 'p_phone', width: 18 },
+            { header: 'Pendidikan', key: 'p_education', width: 15 },
+            { header: 'Pekerjaan', key: 'p_occupation', width: 18 },
+            { header: 'Status Pernikahan', key: 'p_marital', width: 18 },
+            { header: 'Kategori', key: 'p_kategori', width: 15 },
+            { header: 'Diagnosa Medis', key: 'p_diagnosis', width: 25 },
+            { header: 'Rencana Tindakan', key: 'p_treatment', width: 25 },
+
+            // PENDAMPING 1 (15 cols: 21-35 / U-AI)
+            { header: 'NIK', key: 'v1_nik', width: 20 },
+            { header: 'Nama Pendamping', key: 'v1_name', width: 25 },
+            { header: 'Hubungan dengan Pasien', key: 'v1_relation', width: 20 },
+            { header: 'Jenis Kelamin', key: 'v1_gender', width: 15 },
+            { header: 'Tempat, Tanggal Lahir', key: 'v1_dob', width: 20 },
+            { header: 'Usia (Tahun)', key: 'v1_age', width: 12 },
+            { header: 'Alamat Lengkap', key: 'v1_address', width: 30 },
+            { header: 'RT/RW', key: 'v1_rtrw', width: 10 },
+            { header: 'Kelurahan/Desa', key: 'v1_kelurahan', width: 18 },
+            { header: 'Kecamatan', key: 'v1_kecamatan', width: 18 },
+            { header: 'Kab/Kota', key: 'v1_kabupaten', width: 18 },
+            { header: 'Provinsi', key: 'v1_provinsi', width: 18 },
+            { header: 'No HP/Telepon', key: 'v1_phone', width: 18 },
+            { header: 'Pendidikan', key: 'v1_education', width: 15 },
+            { header: 'Pekerjaan', key: 'v1_occupation', width: 18 },
+
+            // PENDAMPING 2 (15 cols: 36-50 / AJ-AX)
+            { header: 'NIK', key: 'v2_nik', width: 20 },
+            { header: 'Nama Pendamping', key: 'v2_name', width: 25 },
+            { header: 'Hubungan dengan Pasien', key: 'v2_relation', width: 20 },
+            { header: 'Jenis Kelamin', key: 'v2_gender', width: 15 },
+            { header: 'Tempat, Tanggal Lahir', key: 'v2_dob', width: 20 },
+            { header: 'Usia (Tahun)', key: 'v2_age', width: 12 },
+            { header: 'Alamat Lengkap', key: 'v2_address', width: 30 },
+            { header: 'RT/RW', key: 'v2_rtrw', width: 10 },
+            { header: 'Kelurahan/Desa', key: 'v2_kelurahan', width: 18 },
+            { header: 'Kecamatan', key: 'v2_kecamatan', width: 18 },
+            { header: 'Kab/Kota', key: 'v2_kabupaten', width: 18 },
+            { header: 'Provinsi', key: 'v2_provinsi', width: 18 },
+            { header: 'No HP/Telepon', key: 'v2_phone', width: 18 },
+            { header: 'Pendidikan', key: 'v2_education', width: 15 },
+            { header: 'Pekerjaan', key: 'v2_occupation', width: 18 },
+
+            // RUMAH SINGGAH (7 cols: 51-57)
+            { header: 'ID', key: 'rs_id', width: 15 },
+            { header: 'RS Rujukan / Asal Faskes', key: 'rs_asal', width: 25 },
+            { header: 'Tgl Masuk', key: 'rs_masuk', width: 15 },
+            { header: 'Tgl Keluar', key: 'rs_keluar', width: 15 },
+            { header: 'Lama Inap (Hari)', key: 'rs_lama', width: 15 },
+            { header: 'Status Kepulangan', key: 'rs_status', width: 20 },
+            { header: 'Keterangan', key: 'rs_ket', width: 20 },
+
+            // FASILITAS (4 cols: 58-61)
+            { header: 'Gedung', key: 'f_gedung', width: 15 },
+            { header: 'Lantai', key: 'f_lantai', width: 15 },
+            { header: 'Nomor Kamar', key: 'f_kamar', width: 15 },
+            { header: 'Nomor Bed', key: 'f_bed', width: 15 }
         ];
 
-        const getAgeCategory = (dob) => {
+        // Insert group header row
+        sheet.spliceRows(1, 0, []); 
+        const groupHeaderRow = sheet.getRow(1);
+        
+        groupHeaderRow.getCell(1).value = 'PASIEN';
+        sheet.mergeCells(1, 1, 1, 20);
+        groupHeaderRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00B0F0' } };
+
+        groupHeaderRow.getCell(21).value = 'PENDAMPING 1';
+        sheet.mergeCells(1, 21, 1, 35);
+        groupHeaderRow.getCell(21).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
+
+        groupHeaderRow.getCell(36).value = 'PENDAMPING 2';
+        sheet.mergeCells(1, 36, 1, 50);
+        groupHeaderRow.getCell(36).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
+
+        groupHeaderRow.getCell(51).value = 'RUMAH SINGGAH';
+        sheet.mergeCells(1, 51, 1, 57);
+        groupHeaderRow.getCell(51).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4B084' } };
+
+        groupHeaderRow.getCell(58).value = 'FASILITAS';
+        sheet.mergeCells(1, 58, 1, 61);
+        groupHeaderRow.getCell(58).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+
+        groupHeaderRow.height = 25;
+        groupHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        groupHeaderRow.getCell(58).font = { bold: true, color: { argb: 'FF000000' } }; // Yellow bg needs black text
+        groupHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        const colHeaderRow = sheet.getRow(2);
+        colHeaderRow.font = { bold: true };
+        colHeaderRow.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+
+        const getAge = (dob) => {
             if (!dob) return '-';
             const birthDate = new Date(dob);
             const today = new Date();
             let age = today.getFullYear() - birthDate.getFullYear();
             const m = today.getMonth() - birthDate.getMonth();
             if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
-            if (age < 18) return 'Anak Anak';
-            if (age >= 60) return 'Lansia';
-            return 'Dewasa';
+            return age >= 0 ? age : '-';
         };
 
-        const getDiseaseCategory = (diagnosis) => {
-            if (!diagnosis) return 'Non Kanker';
-            const d = diagnosis.toLowerCase();
-            const keywords = ['kanker', 'cancer', 'tumor', 'ca ', 'carcinoma', 'melanoma', 'sarcoma', 'limfoma', 'leukemia'];
-            if (keywords.some(k => d.includes(k))) return 'Kanker';
-            return 'Non Kanker';
+        const calculateDays = (inDate, outDate) => {
+            if (!inDate) return '-';
+            const end = outDate ? new Date(outDate) : new Date();
+            const start = new Date(inDate);
+            const diffTime = Math.abs(end - start);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+            return diffDays === 0 ? 1 : diffDays;
         };
 
         let currentNo = 1;
         rows.forEach((row) => {
-            // Add Patient Row
-            sheet.addRow({
-                no: currentNo++,
-                nik: row.nik,
-                name: row.patient_name,
-                phone: row.phone || '-',
-                address: row.address || '-',
-                kelurahan: row.kelurahan || '-',
-                kecamatan: row.kecamatan || '-',
-                kabupaten: row.kabupaten || '-',
-                provinsi: row.provinsi || '-',
-                penghuni: 'Pasien',
-                gender: row.gender || '-',
-                dob: row.dob ? new Date(row.dob).toLocaleDateString('id-ID') : '-',
-                age_cat: getAgeCategory(row.dob),
-                education: '-', // Not in DB
-                occupation: row.occupation || '-',
-                diagnosis: row.diagnosis || '-',
-                diag_cat: getDiseaseCategory(row.diagnosis),
-                status: row.final_status ? 'Checked Out' : 'Masih dirawat',
-                check_in: row.check_in_date ? new Date(row.check_in_date) : null,
-                check_out: row.check_out_date ? new Date(row.check_out_date) : null
-            });
-
-            // Add Visitor Rows
             const visitors = visitorsMap[row.id] || [];
-            visitors.forEach(v => {
-                sheet.addRow({
-                    no: currentNo++,
-                    nik: v.nik,
-                    name: v.name,
-                    phone: v.phone || '-',
-                    address: row.address || '-', // Default to patient's address
-                    kelurahan: row.kelurahan || '-',
-                    kecamatan: row.kecamatan || '-',
-                    kabupaten: row.kabupaten || '-',
-                    provinsi: row.provinsi || '-',
-                    penghuni: 'Pendamping',
-                    gender: '-', // Not in DB for visitors
-                    dob: '-', // Not in DB for visitors
-                    age_cat: '-',
-                    education: '-',
-                    occupation: '-',
-                    diagnosis: '-',
-                    diag_cat: '-',
-                    status: row.final_status ? 'Checked Out' : 'Masih dirawat',
-                    check_in: row.check_in_date ? new Date(row.check_in_date) : null,
-                    check_out: row.check_out_date ? new Date(row.check_out_date) : null
-                });
+            
+            const pData = {
+                no: currentNo++,
+                p_nik: row.nik || '-',
+                p_name: row.patient_name || '-',
+                p_ibu: '-', // Not in DB
+                p_gender: row.gender || '-',
+                p_dob: row.dob ? new Date(row.dob).toLocaleDateString('id-ID') : '-',
+                p_age: getAge(row.dob),
+                p_address: row.address || '-',
+                p_rtrw: row.rt_rw || '-',
+                p_kelurahan: row.kelurahan || '-',
+                p_kecamatan: row.kecamatan || '-',
+                p_kabupaten: row.kabupaten || '-',
+                p_provinsi: row.provinsi || '-',
+                p_phone: row.phone || '-',
+                p_education: row.education || '-',
+                p_occupation: row.occupation || '-',
+                p_marital: '-', // Not in DB
+                p_kategori: 'Mustahik', // Defaulting as this is YBM
+                p_diagnosis: row.diagnosis || '-',
+                p_treatment: row.treatment_plan || '-',
+                
+                rs_id: `RS-${row.id.toString().padStart(4, '0')}`,
+                rs_asal: '-', // Not in DB currently
+                rs_masuk: row.check_in_date ? new Date(row.check_in_date) : null,
+                rs_keluar: row.check_out_date ? new Date(row.check_out_date) : null,
+                rs_lama: calculateDays(row.check_in_date, row.check_out_date),
+                rs_status: row.final_status || 'Masih dirawat',
+                rs_ket: '-',
+
+                f_gedung: '-', // Not in DB
+                f_lantai: '-', // Not in DB
+                f_kamar: row.room_number || '-',
+                f_bed: row.bed_number || '-'
+            };
+
+            const v1 = visitors[0];
+            const v2 = visitors[1];
+
+            const v1Data = v1 ? {
+                v1_nik: v1.nik || '-',
+                v1_name: v1.name || '-',
+                v1_relation: v1.relation || '-',
+                v1_gender: v1.gender || '-',
+                v1_dob: v1.dob ? new Date(v1.dob).toLocaleDateString('id-ID') : '-',
+                v1_age: getAge(v1.dob),
+                v1_address: v1.address || '-',
+                v1_rtrw: v1.rt_rw || '-',
+                v1_kelurahan: v1.kelurahan || '-',
+                v1_kecamatan: v1.kecamatan || '-',
+                v1_kabupaten: v1.kabupaten || '-',
+                v1_provinsi: v1.provinsi || '-',
+                v1_phone: v1.phone || '-',
+                v1_education: v1.education || '-',
+                v1_occupation: v1.occupation || '-'
+            } : {
+                v1_nik: '-', v1_name: '-', v1_relation: '-', v1_gender: '-', v1_dob: '-', v1_age: '-',
+                v1_address: '-', v1_rtrw: '-', v1_kelurahan: '-', v1_kecamatan: '-', v1_kabupaten: '-', 
+                v1_provinsi: '-', v1_phone: '-', v1_education: '-', v1_occupation: '-'
+            };
+
+            const v2Data = v2 ? {
+                v2_nik: v2.nik || '-',
+                v2_name: v2.name || '-',
+                v2_relation: v2.relation || '-',
+                v2_gender: v2.gender || '-',
+                v2_dob: v2.dob ? new Date(v2.dob).toLocaleDateString('id-ID') : '-',
+                v2_age: getAge(v2.dob),
+                v2_address: v2.address || '-',
+                v2_rtrw: v2.rt_rw || '-',
+                v2_kelurahan: v2.kelurahan || '-',
+                v2_kecamatan: v2.kecamatan || '-',
+                v2_kabupaten: v2.kabupaten || '-',
+                v2_provinsi: v2.provinsi || '-',
+                v2_phone: v2.phone || '-',
+                v2_education: v2.education || '-',
+                v2_occupation: v2.occupation || '-'
+            } : {
+                v2_nik: '-', v2_name: '-', v2_relation: '-', v2_gender: '-', v2_dob: '-', v2_age: '-',
+                v2_address: '-', v2_rtrw: '-', v2_kelurahan: '-', v2_kecamatan: '-', v2_kabupaten: '-', 
+                v2_provinsi: '-', v2_phone: '-', v2_education: '-', v2_occupation: '-'
+            };
+
+            sheet.addRow({
+                ...pData,
+                ...v1Data,
+                ...v2Data
             });
         });
 
-        sheet.getRow(1).font = { bold: true };
-        sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
-        sheet.getColumn('check_in').numFmt = 'dd/mm/yy';
-        sheet.getColumn('check_out').numFmt = 'dd/mm/yy';
-
-        // Apply stripes or colors if needed, but basic matching columns is priority
+        // Add thin borders to all data and header cells
         sheet.eachRow((row, rowNumber) => {
-            if (rowNumber > 1) {
-                const penghuni = row.getCell('penghuni').value;
-                if (penghuni === 'Pasien') {
-                    row.fill = {
-                        type: 'pattern',
-                        pattern: 'solid',
-                        fgColor: { argb: 'FFFFF00' } // Yellow like in screenshot
-                    };
-                }
-            }
+            row.eachCell((cell) => {
+                cell.border = {
+                    top: { style: 'thin' },
+                    left: { style: 'thin' },
+                    bottom: { style: 'thin' },
+                    right: { style: 'thin' }
+                };
+            });
         });
+
+        sheet.getColumn('rs_masuk').numFmt = 'dd/mm/yyyy';
+        sheet.getColumn('rs_keluar').numFmt = 'dd/mm/yyyy';
 
         res.setHeader(
             'Content-Type',
@@ -347,7 +468,7 @@ exports.exportAmbulanceUsage = async (req, res) => {
         const [rows] = await db.query(
             `SELECT 
                 al.id, al.ambulance_id, al.destination, al.departure_time, al.return_time, al.status,
-                al.km_start, al.km_end, al.driver_name, al.fuel_cost,
+                al.km_start, al.km_end, al.driver_name, al.fuel_cost, al.fuel_condition, al.fuel_filled,
                 a.plate_number, a.vehicle_model,
                 p.name AS patient_name, p.registration_number
              FROM AmbulanceLogs al
@@ -381,7 +502,9 @@ exports.exportAmbulanceUsage = async (req, res) => {
             { header: 'Tujuan', key: 'destination', width: 30 },
             { header: 'Nama Pasien', key: 'patient_name', width: 26 },
             { header: 'No Registrasi', key: 'registration_number', width: 20 },
-            { header: 'Kondisi BBM', key: 'fuel', width: 15 },
+            { header: 'Kondisi BBM (Berangkat)', key: 'fuel_cond', width: 20 },
+            { header: 'Isi BBM (Berangkat)', key: 'fuel_filled', width: 20 },
+            { header: 'Biaya BBM Akhir', key: 'fuel', width: 15 },
             { header: 'Berangkat', key: 'departure', width: 20 },
             { header: 'Kembali', key: 'return', width: 20 },
             { header: 'KM Berangkat', key: 'km_start', width: 15 },
@@ -401,6 +524,8 @@ exports.exportAmbulanceUsage = async (req, res) => {
                 destination: row.destination,
                 patient_name: row.patient_name || '-',
                 registration_number: row.registration_number || '-',
+                fuel_cond: row.fuel_condition || '-',
+                fuel_filled: row.fuel_filled || '-',
                 fuel: row.fuel_cost || 0,
                 departure: row.departure_time ? new Date(row.departure_time).toLocaleString('id-ID') : '-',
                 return: row.return_time ? new Date(row.return_time).toLocaleString('id-ID') : '-',

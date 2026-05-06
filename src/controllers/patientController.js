@@ -28,6 +28,7 @@ exports.getPatientByNik = async (req, res) => {
             `SELECT p.id, p.name, p.nik, p.dob, p.gender, p.address, p.phone, p.registration_number,
                     p.rt_rw, p.kelurahan, p.kecamatan, p.kabupaten, p.provinsi,
                     p.diagnosis, p.treatment_plan, p.occupation, p.income,
+                    p.age, p.age_category, p.education, p.disease_category,
                     (SELECT pr.status_mustahik FROM PatientRegistrations pr WHERE pr.patient_id = p.id ORDER BY pr.created_at DESC LIMIT 1) AS status_mustahik,
                     (SELECT pr.status_verification FROM PatientRegistrations pr WHERE pr.patient_id = p.id ORDER BY pr.created_at DESC LIMIT 1) AS status_verification,
                     EXISTS(SELECT 1 FROM StayLogs s WHERE s.patient_id = p.id AND s.final_status IS NOT NULL) AS sudah_pulang,
@@ -197,7 +198,8 @@ exports.registerPatient = async (req, res) => {
     const {
         name, nik, dob, gender, address, phone, status_mustahik,
         rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
-        diagnosis, treatment_plan, occupation, income
+        diagnosis, treatment_plan, occupation, income,
+        age, age_category, education, disease_category
     } = req.body;
 
     if (!isValidNIK(nik)) {
@@ -237,11 +239,13 @@ exports.registerPatient = async (req, res) => {
             const userId = req.user?.id || null;
             const [patientResult] = await connection.query(
                 `INSERT INTO Patients (registration_number, name, nik, dob, gender, address, phone,
-                 rt_rw, kelurahan, kecamatan, kabupaten, provinsi, diagnosis, treatment_plan, occupation, income, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 rt_rw, kelurahan, kecamatan, kabupaten, provinsi, diagnosis, treatment_plan, occupation, income, 
+                 age, age_category, education, disease_category, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [regNum, name, nik, dob, gender, address, phone,
                     rt_rw || null, kelurahan || null, kecamatan || null, kabupaten || null, provinsi || null,
-                    diagnosis || null, treatment_plan || null, occupation || null, income || null, userId]
+                    diagnosis || null, treatment_plan || null, occupation || null, income || null, 
+                    age || null, age_category || null, education || null, disease_category || null, userId]
             );
 
             const patientId = patientResult.insertId;
@@ -298,7 +302,8 @@ exports.reRegister = async (req, res) => {
     const {
         name, dob, gender, address, phone, status_mustahik,
         rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
-        diagnosis, treatment_plan, occupation, income
+        diagnosis, treatment_plan, occupation, income,
+        age, age_category, education, disease_category
     } = req.body;
 
     try {
@@ -323,7 +328,8 @@ exports.reRegister = async (req, res) => {
         const fields = {
             name, dob, gender, address, phone,
             rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
-            diagnosis, treatment_plan, occupation, income
+            diagnosis, treatment_plan, occupation, income,
+            age, age_category, education, disease_category
         };
         for (const [key, value] of Object.entries(fields)) {
             if (value !== undefined && value !== '') {
@@ -359,7 +365,8 @@ exports.updatePatient = async (req, res) => {
     const {
         name, nik, dob, gender, address, phone, status_mustahik,
         rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
-        diagnosis, treatment_plan, occupation, income
+        diagnosis, treatment_plan, occupation, income,
+        age, age_category, education, disease_category
     } = req.body;
 
     if (nik !== undefined && !isValidNIK(nik)) {
@@ -400,7 +407,8 @@ exports.updatePatient = async (req, res) => {
         const fields = {
             name, nik, dob, gender, address, phone,
             rt_rw, kelurahan, kecamatan, kabupaten, provinsi,
-            diagnosis, treatment_plan, occupation, income
+            diagnosis, treatment_plan, occupation, income,
+            age, age_category, education, disease_category
         };
         for (const [key, value] of Object.entries(fields)) {
             if (value !== undefined) {
