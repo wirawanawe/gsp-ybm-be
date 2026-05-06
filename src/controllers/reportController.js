@@ -170,7 +170,7 @@ exports.exportPatientInOut = async (req, res) => {
                 s.departure_photo_path, s.transfer_reason,
                 p.name AS patient_name, p.registration_number, p.nik, p.dob, p.gender, p.phone, p.address,
                 p.rt_rw, p.kelurahan, p.kecamatan, p.kabupaten, p.provinsi, p.diagnosis, p.occupation, p.income,
-                p.age_category, p.education, p.disease_category,
+                p.age_category, p.education, p.disease_category, p.treatment_plan, p.rs_rujukan,
                 b.bed_number, r.room_number
              FROM StayLogs s
              JOIN Patients p ON p.id = s.patient_id
@@ -204,14 +204,14 @@ exports.exportPatientInOut = async (req, res) => {
         const sheet = workbook.addWorksheet('Laporan Pasien');
 
         sheet.columns = [
-            // PASIEN (20 cols: 1-20 / A-T)
+                        // PASIEN (20 cols: 1-20 / A-T)
             { header: 'No', key: 'no', width: 6 },
             { header: 'NIK (No. KTP)', key: 'p_nik', width: 20 },
             { header: 'Nama Pasien / Mustahik', key: 'p_name', width: 25 },
-            { header: 'Nama Ibu Kandung', key: 'p_ibu', width: 20 },
             { header: 'Jenis Kelamin', key: 'p_gender', width: 15 },
             { header: 'Tempat, Tanggal Lahir', key: 'p_dob', width: 20 },
             { header: 'Usia (Tahun)', key: 'p_age', width: 12 },
+            { header: 'Kategori Usia', key: 'p_age_category', width: 15 },
             { header: 'Alamat Lengkap', key: 'p_address', width: 30 },
             { header: 'RT/RW', key: 'p_rtrw', width: 10 },
             { header: 'Kelurahan/Desa', key: 'p_kelurahan', width: 18 },
@@ -221,9 +221,9 @@ exports.exportPatientInOut = async (req, res) => {
             { header: 'No HP/Telepon', key: 'p_phone', width: 18 },
             { header: 'Pendidikan', key: 'p_education', width: 15 },
             { header: 'Pekerjaan', key: 'p_occupation', width: 18 },
-            { header: 'Status Pernikahan', key: 'p_marital', width: 18 },
             { header: 'Kategori', key: 'p_kategori', width: 15 },
             { header: 'Diagnosa Medis', key: 'p_diagnosis', width: 25 },
+            { header: 'Kategori Penyakit', key: 'p_disease_category', width: 20 },
             { header: 'Rencana Tindakan', key: 'p_treatment', width: 25 },
 
             // PENDAMPING 1 (15 cols: 21-35 / U-AI)
@@ -269,9 +269,7 @@ exports.exportPatientInOut = async (req, res) => {
             { header: 'Status Kepulangan', key: 'rs_status', width: 20 },
             { header: 'Keterangan', key: 'rs_ket', width: 20 },
 
-            // FASILITAS (4 cols: 58-61)
-            { header: 'Gedung', key: 'f_gedung', width: 15 },
-            { header: 'Lantai', key: 'f_lantai', width: 15 },
+            // FASILITAS (2 cols: 58-59)
             { header: 'Nomor Kamar', key: 'f_kamar', width: 15 },
             { header: 'Nomor Bed', key: 'f_bed', width: 15 }
         ];
@@ -297,7 +295,7 @@ exports.exportPatientInOut = async (req, res) => {
         groupHeaderRow.getCell(51).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4B084' } };
 
         groupHeaderRow.getCell(58).value = 'FASILITAS';
-        sheet.mergeCells(1, 58, 1, 61);
+        sheet.mergeCells(1, 58, 1, 59);
         groupHeaderRow.getCell(58).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
 
         groupHeaderRow.height = 25;
@@ -332,14 +330,14 @@ exports.exportPatientInOut = async (req, res) => {
         rows.forEach((row) => {
             const visitors = visitorsMap[row.id] || [];
             
-            const pData = {
+                        const pData = {
                 no: currentNo++,
                 p_nik: row.nik || '-',
                 p_name: row.patient_name || '-',
-                p_ibu: '-', // Not in DB
                 p_gender: row.gender || '-',
                 p_dob: row.dob ? new Date(row.dob).toLocaleDateString('id-ID') : '-',
                 p_age: getAge(row.dob),
+                p_age_category: row.age_category || '-',
                 p_address: row.address || '-',
                 p_rtrw: row.rt_rw || '-',
                 p_kelurahan: row.kelurahan || '-',
@@ -349,21 +347,19 @@ exports.exportPatientInOut = async (req, res) => {
                 p_phone: row.phone || '-',
                 p_education: row.education || '-',
                 p_occupation: row.occupation || '-',
-                p_marital: '-', // Not in DB
                 p_kategori: 'Mustahik', // Defaulting as this is YBM
                 p_diagnosis: row.diagnosis || '-',
+                p_disease_category: row.disease_category || '-',
                 p_treatment: row.treatment_plan || '-',
                 
                 rs_id: `RS-${row.id.toString().padStart(4, '0')}`,
-                rs_asal: '-', // Not in DB currently
+                rs_asal: row.rs_rujukan || '-',
                 rs_masuk: row.check_in_date ? new Date(row.check_in_date) : null,
                 rs_keluar: row.check_out_date ? new Date(row.check_out_date) : null,
                 rs_lama: calculateDays(row.check_in_date, row.check_out_date),
                 rs_status: row.final_status || 'Masih dirawat',
                 rs_ket: '-',
 
-                f_gedung: '-', // Not in DB
-                f_lantai: '-', // Not in DB
                 f_kamar: row.room_number || '-',
                 f_bed: row.bed_number || '-'
             };
