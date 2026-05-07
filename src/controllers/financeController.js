@@ -376,11 +376,15 @@ exports.exportExcel = async (req, res) => {
         ];
 
         let cumulativeSaldo = 0;
+        let totalDebit = 0;
+        let totalKredit = 0;
         transactions.forEach(t => {
             const isIncome = t.type === 'income';
             const incomeAmt = isIncome ? Number(t.amount) : 0;
             const expenseAmt = !isIncome ? Number(t.amount) : 0;
             cumulativeSaldo = cumulativeSaldo + incomeAmt - expenseAmt;
+            totalDebit += incomeAmt;
+            totalKredit += expenseAmt;
 
             sheet.addRow({
                 date: t.trx_date ? new Date(t.trx_date).toLocaleDateString('id-ID') : '-',
@@ -392,6 +396,13 @@ exports.exportExcel = async (req, res) => {
                 kredit: expenseAmt > 0 ? expenseAmt : '',
                 saldo: cumulativeSaldo
             });
+        });
+
+        // Tambah baris total di paling bawah
+        const totalRow = sheet.addRow({
+            description: 'Total',
+            debit: totalDebit,
+            kredit: totalKredit
         });
 
         // Styling
@@ -426,6 +437,10 @@ exports.exportExcel = async (req, res) => {
                 }
             });
         });
+
+        // Styling khusus untuk baris total (bold dan teks 'Total' di tengah)
+        totalRow.font = { bold: true };
+        totalRow.getCell(3).alignment = { vertical: 'middle', horizontal: 'center' };
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="Laporan_Keuangan_${period}.xlsx"`);

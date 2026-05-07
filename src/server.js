@@ -13,12 +13,24 @@ const app = express();
 app.set('trust proxy', 1);
 
 // CORS - izinkan localhost:3000 dan FRONTEND_URL (mis. http://192.168.18.49:3000)
-const allowedOrigins = ['http://localhost:3330'];
-if (process.env.FRONTEND_URL) allowedOrigins.push(process.env.FRONTEND_URL.trim());
+const allowedOrigins = ['http://localhost:3330', 'http://127.0.0.1:3330'];
+if (process.env.FRONTEND_URL) {
+    const urls = process.env.FRONTEND_URL.split(',').map(url => url.trim().replace(/\/$/, ''));
+    allowedOrigins.push(...urls);
+}
+
 const corsOptions = {
     origin: (origin, cb) => {
-        if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-        cb(null, false);
+        // allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return cb(null, true);
+        
+        const originNormalized = origin.replace(/\/$/, '');
+        if (allowedOrigins.includes(originNormalized)) {
+            cb(null, true);
+        } else {
+            console.warn(`CORS blocked for origin: ${origin}`);
+            cb(null, false);
+        }
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
