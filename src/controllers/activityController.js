@@ -1,10 +1,21 @@
 const db = require('../config/db');
+const ExcelJS = require('exceljs');
 
 // ─── ACTIVITY SCHEDULES ───────────────────────────────────────────────────────
 
 /** GET /api/activities — list jadwal (optional: ?type=Tahsin|Taklim|Kegiatan Harian) */
 exports.getSchedules = async (req, res) => {
     try {
+        // Auto-deactivate Taklim one-time schedules that have passed
+        await db.query(`
+            UPDATE ActivitySchedules 
+            SET is_active = 0 
+            WHERE type = 'Taklim' 
+              AND is_recurring = 0 
+              AND scheduled_date < CURDATE() 
+              AND is_active = 1
+        `);
+
         const { type, is_active } = req.query;
         let sql = 'SELECT * FROM ActivitySchedules WHERE 1=1';
         const params = [];
@@ -216,6 +227,16 @@ function localDateStr(d) {
 /** GET /api/activities/upcoming — jadwal kegiatan 7 hari ke depan (untuk dashboard) */
 exports.getUpcomingSchedules = async (req, res) => {
     try {
+        // Auto-deactivate Taklim one-time schedules that have passed
+        await db.query(`
+            UPDATE ActivitySchedules 
+            SET is_active = 0 
+            WHERE type = 'Taklim' 
+              AND is_recurring = 0 
+              AND scheduled_date < CURDATE() 
+              AND is_active = 1
+        `);
+
         // Hari ini dalam angka (0=Minggu, 1=Senin, ..., 6=Sabtu) — pakai LOCAL time server
         const today = new Date();
         const todayNum = today.getDay(); // JS: 0=Sun
@@ -289,3 +310,107 @@ exports.getUpcomingSchedules = async (req, res) => {
     }
 };
 
+
+/** GET /api/reports/activity — Laporan kegiatan & presensi (filtered by date) */
+exports.getActivityReport = async (req, res) => {
+    try {
+        const { start_date, end_date } = req.query;
+        let sql = `
+            SELECT a.*, s.title AS activity_title, s.type AS activity_type, p.name AS patient_name
+            FROM ActivityAttendance a
+            JOIN ActivitySchedules s ON a.schedule_id = s.id
+            LEFT JOIN Patients p ON a.patient_id = p.id
+            WHERE 1=1
+        `;
+        const params = [];
+        if (start_date) { sql += ' AND a.attendance_date >= ?'; params.push(start_date); }
+        if (end_date)   { sql += ' AND a.attendance_date <= ?'; params.push(end_date); }
+        
+        sql += ' ORDER BY a.attendance_date DESC, s.title ASC';
+        
+        const [rows] = await db.query(sql, params);
+        res.json(rows);
+    } catch (err) {
+        console.error('getActivityReport error:', err);
+        res.status(500).json({ message: 'Gagal mengambil laporan kegiatan' });
+    }
+};
+
+/** GET /api/reports/activity/export — Export laporan kegiatan ke Excel */
+exports.exportActivityReport = async (req, res) => {
+    try {
+        const { start_date, end_date } = req.query;
+        let sql = `
+            SELECT a.*, s.title AS activity_title, s.type AS activity_type, p.name AS patient_name
+            FROM ActivityAttendance a
+            JOIN ActivitySchedules s ON a.schedule_id = s.id
+            LEFT JOIN Patients p ON a.patient_id = p.id
+            WHERE 1=1
+        `;
+        const params = [];
+        if (start_date) { sql += ' AND a.attendance_date >= ?'; params.push(start_date); }
+        if (end_date)   { sql += ' AND a.attendance_date <= ?'; params.push(end_date); }
+        
+        sql += ' ORDER BY a.attendance_date ASC, s.title ASC';
+        
+        const [rows] = await db.query(sql, params);
+
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('Laporan Kegiatan');
+
+        sheet.columns = [
+            { header: 'Tanggal', key: 'date', width: 15 },
+            { header: 'Nama Kegiatan', key: 'title', width: 30 },
+            { header: 'Tipe', key: 'type', width: 15 },
+            { header: 'Peserta', key: 'participant', width: 25 },
+            { header: 'Kategori', key: 'category', width: 15 },
+            { header: 'Status', key: 'status', width: 12 },
+            { header: 'Keterangan', key: 'notes', width: 30 }
+        ];
+
+        rows.forEach(r => {
+            sheet.addRow({
+                date: r.attendance_date ? new Date(r.attendance_date).toLocaleDateString('id-ID') : '-',
+                title: r.activity_title || '-',
+                type: r.activity_type || '-',
+                participant: r.participant_name || '-',
+                category: r.participant_type || '-',
+                status: r.status || '-',
+                notes: r.notes || '-'
+            });
+        });
+
+        // Styling
+        const headerRow = sheet.getRow(1);
+        headerRow.height = 30;
+        headerRow.eachCell((cell) => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDEE6F0' } };
+            cell.font = { bold: true };
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+            cell.border = {
+                top: { style: 'thin' }, left: { style: 'thin' },
+                bottom: { style: 'thin' }, right: { style: 'thin' }
+            };
+        });
+
+        sheet.eachRow((row, rowNumber) => {
+            if (rowNumber === 1) return;
+            row.eachCell({ includeEmpty: true }, (cell) => {
+                cell.border = {
+                    top: { style: 'thin' }, left: { style: 'thin' },
+                    bottom: { style: 'thin' }, right: { style: 'thin' }
+                };
+                cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+            });
+        });
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="Laporan_Kegiatan.xlsx"`);
+        await workbook.xlsx.write(res);
+        res.end();
+
+    } catch (err) {
+        console.error('exportActivityReport error:', err);
+        res.status(500).json({ message: 'Gagal mengekspor laporan kegiatan' });
+    }
+};
