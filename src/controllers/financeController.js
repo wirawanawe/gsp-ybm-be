@@ -227,9 +227,11 @@ exports.getReport = async (req, res) => {
             eParams
         );
 
-        const transactions = [...incomeList, ...expenseList].sort(
-            (a, b) => new Date(b.trx_date) - new Date(a.trx_date)
-        );
+        const transactions = [...incomeList, ...expenseList].sort((a, b) => {
+            const numA = a.receipt_number || '';
+            const numB = b.receipt_number || '';
+            return numA.localeCompare(numB, undefined, { numeric: true, sensitivity: 'base' });
+        });
 
         res.json({
             period, year: y, month: m,

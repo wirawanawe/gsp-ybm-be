@@ -200,6 +200,20 @@ exports.exportPatientInOut = async (req, res) => {
             });
         }
 
+        // Fetch document status for these patients
+        const patientIds = [...new Set(rows.map(r => r.patient_id))];
+        let docsMap = {};
+        if (patientIds.length > 0) {
+            const [dRows] = await db.query(
+                `SELECT patient_id, document_type FROM Documents WHERE patient_id IN (?)`,
+                [patientIds]
+            );
+            dRows.forEach(d => {
+                if (!docsMap[d.patient_id]) docsMap[d.patient_id] = new Set();
+                docsMap[d.patient_id].add(d.document_type);
+            });
+        }
+
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('Laporan Pasien');
 
@@ -225,8 +239,9 @@ exports.exportPatientInOut = async (req, res) => {
             { header: 'Diagnosa Medis', key: 'p_diagnosis', width: 25 },
             { header: 'Kategori Penyakit', key: 'p_disease_category', width: 20 },
             { header: 'Rencana Tindakan', key: 'p_treatment', width: 25 },
+            { header: 'Kelengkapan Data (Dokumen)', key: 'p_docs', width: 40 },
 
-            // PENDAMPING 1 (15 cols: 21-35 / U-AI)
+            // PENDAMPING 1 (15 cols: 22-36 / V-AJ)
             { header: 'NIK', key: 'v1_nik', width: 20 },
             { header: 'Nama Pendamping', key: 'v1_name', width: 25 },
             { header: 'Hubungan dengan Pasien', key: 'v1_relation', width: 20 },
@@ -269,7 +284,6 @@ exports.exportPatientInOut = async (req, res) => {
             { header: 'Status Kepulangan', key: 'rs_status', width: 20 },
             { header: 'Keterangan', key: 'rs_ket', width: 20 },
 
-            // FASILITAS (2 cols: 58-59)
             { header: 'Nomor Kamar', key: 'f_kamar', width: 15 },
             { header: 'Nomor Bed', key: 'f_bed', width: 15 }
         ];
@@ -279,28 +293,28 @@ exports.exportPatientInOut = async (req, res) => {
         const groupHeaderRow = sheet.getRow(1);
         
         groupHeaderRow.getCell(1).value = 'PASIEN';
-        sheet.mergeCells(1, 1, 1, 20);
+        sheet.mergeCells(1, 1, 1, 21);
         groupHeaderRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00B0F0' } };
 
-        groupHeaderRow.getCell(21).value = 'PENDAMPING 1';
-        sheet.mergeCells(1, 21, 1, 35);
-        groupHeaderRow.getCell(21).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
+        groupHeaderRow.getCell(22).value = 'PENDAMPING 1';
+        sheet.mergeCells(1, 22, 1, 36);
+        groupHeaderRow.getCell(22).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
 
-        groupHeaderRow.getCell(36).value = 'PENDAMPING 2';
-        sheet.mergeCells(1, 36, 1, 50);
-        groupHeaderRow.getCell(36).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
+        groupHeaderRow.getCell(37).value = 'PENDAMPING 2';
+        sheet.mergeCells(1, 37, 1, 51);
+        groupHeaderRow.getCell(37).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
 
-        groupHeaderRow.getCell(51).value = 'RUMAH SINGGAH';
-        sheet.mergeCells(1, 51, 1, 57);
-        groupHeaderRow.getCell(51).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4B084' } };
+        groupHeaderRow.getCell(52).value = 'RUMAH SINGGAH';
+        sheet.mergeCells(1, 52, 1, 58);
+        groupHeaderRow.getCell(52).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4B084' } };
 
-        groupHeaderRow.getCell(58).value = 'FASILITAS';
-        sheet.mergeCells(1, 58, 1, 59);
-        groupHeaderRow.getCell(58).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+        groupHeaderRow.getCell(59).value = 'FASILITAS';
+        sheet.mergeCells(1, 59, 1, 60);
+        groupHeaderRow.getCell(59).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
 
         groupHeaderRow.height = 25;
         groupHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        groupHeaderRow.getCell(58).font = { bold: true, color: { argb: 'FF000000' } }; // Yellow bg needs black text
+        groupHeaderRow.getCell(59).font = { bold: true, color: { argb: 'FF000000' } }; // Yellow bg needs black text
         groupHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
 
         const colHeaderRow = sheet.getRow(2);
@@ -363,6 +377,14 @@ exports.exportPatientInOut = async (req, res) => {
                 f_kamar: row.room_number || '-',
                 f_bed: row.bed_number || '-'
             };
+
+            // Calculate document completeness
+            const requiredDocs = ['KTP', 'KK', 'BPJS', 'SKTM', 'Rujukan', 'Foto'];
+            const patientDocs = docsMap[row.patient_id] || new Set();
+            const docsStatus = requiredDocs.map(doc => {
+                return `${doc}: ${patientDocs.has(doc) ? '✅' : '❌'}`;
+            }).join(', ');
+            pData.p_docs = docsStatus;
 
             const v1 = visitors[0];
             const v2 = visitors[1];
