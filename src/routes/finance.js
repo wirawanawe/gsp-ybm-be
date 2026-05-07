@@ -20,5 +20,6 @@ router.delete('/expenses/:id', ctrl.deleteExpense);
 // Reports
 router.get('/report', ctrl.getReport);
 router.get('/rekap', ctrl.getRekap);
+router.get('/export', ctrl.exportExcel);
 
 module.exports = router;

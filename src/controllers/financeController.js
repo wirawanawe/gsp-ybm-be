@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const ExcelJS = require('exceljs');
 
 // ─── INCOME ───────────────────────────────────────────────────────────────────
 
@@ -308,5 +309,131 @@ exports.getRekap = async (req, res) => {
     } catch (err) {
         console.error('getRekap error:', err);
         res.status(500).json({ message: 'Gagal mengambil rekap keuangan' });
+    }
+};
+
+/**
+ * GET /api/finance/export?period=monthly|yearly|weekly&year=2025&month=4...
+ * Export Laporan Keuangan ke Excel dengan styling
+ */
+exports.exportExcel = async (req, res) => {
+    try {
+        const { period = 'monthly', year, month, date_from, date_to } = req.query;
+        let incomeWhere = '1=1';
+        let expenseWhere = '1=1';
+        const iParams = [];
+        const eParams = [];
+
+        const now = new Date();
+        const y = parseInt(year || now.getFullYear());
+        const m = parseInt(month || now.getMonth() + 1);
+
+        if (period === 'monthly') {
+            incomeWhere = 'YEAR(income_date) = ? AND MONTH(income_date) = ?';
+            expenseWhere = 'YEAR(expense_date) = ? AND MONTH(expense_date) = ?';
+            iParams.push(y, m); eParams.push(y, m);
+        } else if (period === 'yearly') {
+            incomeWhere = 'YEAR(income_date) = ?';
+            expenseWhere = 'YEAR(expense_date) = ?';
+            iParams.push(y); eParams.push(y);
+        } else if (period === 'weekly' && date_from && date_to) {
+            incomeWhere = 'income_date BETWEEN ? AND ?';
+            expenseWhere = 'expense_date BETWEEN ? AND ?';
+            iParams.push(date_from, date_to); eParams.push(date_from, date_to);
+        }
+
+        const [incomeList] = await db.query(
+            `SELECT 'income' AS type, income_date AS trx_date, source AS description,
+             category, amount, receipt_number, person_in_charge, null AS paid_to FROM FinanceIncome WHERE ${incomeWhere}
+             ORDER BY receipt_number ASC`,
+            iParams
+        );
+        const [expenseList] = await db.query(
+            `SELECT 'expense' AS type, expense_date AS trx_date, description,
+             category, amount, receipt_number, person_in_charge, paid_to FROM FinanceExpenses WHERE ${expenseWhere}
+             ORDER BY receipt_number ASC`,
+            eParams
+        );
+
+        const transactions = [...incomeList, ...expenseList].sort((a, b) => {
+            const numA = a.receipt_number || '';
+            const numB = b.receipt_number || '';
+            return numA.localeCompare(numB, undefined, { numeric: true, sensitivity: 'base' });
+        });
+
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('Laporan Keuangan');
+
+        sheet.columns = [
+            { header: 'Tanggal', key: 'date', width: 15 },
+            { header: 'No Bukti', key: 'receipt', width: 15 },
+            { header: 'Uraian/Penjelasan', key: 'description', width: 40 },
+            { header: 'Dibayar Kepada', key: 'paid_to', width: 25 },
+            { header: 'Kategori', key: 'category', width: 20 },
+            { header: 'Debit (Masuk)', key: 'debit', width: 18 },
+            { header: 'Kredit (Keluar)', key: 'kredit', width: 18 },
+            { header: 'Saldo', key: 'saldo', width: 18 }
+        ];
+
+        let cumulativeSaldo = 0;
+        transactions.forEach(t => {
+            const isIncome = t.type === 'income';
+            const incomeAmt = isIncome ? Number(t.amount) : 0;
+            const expenseAmt = !isIncome ? Number(t.amount) : 0;
+            cumulativeSaldo = cumulativeSaldo + incomeAmt - expenseAmt;
+
+            sheet.addRow({
+                date: t.trx_date ? new Date(t.trx_date).toLocaleDateString('id-ID') : '-',
+                receipt: t.receipt_number || '-',
+                description: t.description || '-',
+                paid_to: t.paid_to || '-',
+                category: t.category || '-',
+                debit: incomeAmt > 0 ? incomeAmt : '',
+                kredit: expenseAmt > 0 ? expenseAmt : '',
+                saldo: cumulativeSaldo
+            });
+        });
+
+        // Styling
+        const headerRow = sheet.getRow(1);
+        headerRow.height = 30;
+        headerRow.eachCell((cell) => {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDEE6F0' } };
+            cell.font = { bold: true };
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+            cell.border = {
+                top: { style: 'thin' }, left: { style: 'thin' },
+                bottom: { style: 'thin' }, right: { style: 'thin' }
+            };
+        });
+
+        sheet.eachRow((row, rowNumber) => {
+            if (rowNumber === 1) return;
+            row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                cell.border = {
+                    top: { style: 'thin' }, left: { style: 'thin' },
+                    bottom: { style: 'thin' }, right: { style: 'thin' }
+                };
+                
+                // Alignment based on column
+                if ([1, 2, 5].includes(colNumber)) {
+                    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+                } else if ([6, 7, 8].includes(colNumber)) {
+                    cell.alignment = { vertical: 'middle', horizontal: 'right' };
+                    cell.numFmt = '#,##0';
+                } else {
+                    cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+                }
+            });
+        });
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="Laporan_Keuangan_${period}.xlsx"`);
+        await workbook.xlsx.write(res);
+        res.end();
+
+    } catch (err) {
+        console.error('exportExcel error:', err);
+        res.status(500).json({ message: 'Gagal mengekspor laporan keuangan' });
     }
 };

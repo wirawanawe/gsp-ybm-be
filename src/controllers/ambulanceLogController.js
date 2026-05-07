@@ -165,7 +165,7 @@ exports.createLog = async (req, res) => {
 // PUT /api/ambulance/logs/:id/complete
 exports.completeLog = async (req, res) => {
     const { id } = req.params;
-    const { return_time, km_end, fuel_cost } = req.body;
+    const { return_time, km_end } = req.body;
 
     try {
         const connection = await db.getConnection();
@@ -188,19 +188,19 @@ exports.completeLog = async (req, res) => {
                 await connection.query(
                     `
           UPDATE AmbulanceLogs
-          SET status = 'Completed', return_time = ?, km_end = ?, fuel_cost = ?, updated_by = ?
+          SET status = 'Completed', return_time = ?, km_end = ?, updated_by = ?
           WHERE id = ?
         `,
-                    [return_time, km_end || 0, fuel_cost || 0, userId, id]
+                    [return_time, km_end || 0, userId, id]
                 );
             } else {
                 await connection.query(
                     `
           UPDATE AmbulanceLogs
-          SET status = 'Completed', return_time = CURRENT_TIMESTAMP, km_end = ?, fuel_cost = ?, updated_by = ?
+          SET status = 'Completed', return_time = CURRENT_TIMESTAMP, km_end = ?, updated_by = ?
           WHERE id = ?
         `,
-                    [km_end || 0, fuel_cost || 0, userId, id]
+                    [km_end || 0, userId, id]
                 );
             }
 

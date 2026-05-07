@@ -294,31 +294,37 @@ exports.exportPatientInOut = async (req, res) => {
         
         groupHeaderRow.getCell(1).value = 'PASIEN';
         sheet.mergeCells(1, 1, 1, 21);
-        groupHeaderRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF00B0F0' } };
+        groupHeaderRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDEE6F0' } };
+        groupHeaderRow.getCell(1).font = { bold: true, color: { argb: 'FF000000' } };
 
         groupHeaderRow.getCell(22).value = 'PENDAMPING 1';
         sheet.mergeCells(1, 22, 1, 36);
-        groupHeaderRow.getCell(22).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
+        groupHeaderRow.getCell(22).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+        groupHeaderRow.getCell(22).font = { bold: true, color: { argb: 'FF000000' } };
 
         groupHeaderRow.getCell(37).value = 'PENDAMPING 2';
         sheet.mergeCells(1, 37, 1, 51);
-        groupHeaderRow.getCell(37).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
+        groupHeaderRow.getCell(37).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+        groupHeaderRow.getCell(37).font = { bold: true, color: { argb: 'FF000000' } };
 
         groupHeaderRow.getCell(52).value = 'RUMAH SINGGAH';
         sheet.mergeCells(1, 52, 1, 58);
-        groupHeaderRow.getCell(52).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4B084' } };
+        groupHeaderRow.getCell(52).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
+        groupHeaderRow.getCell(52).font = { bold: true, color: { argb: 'FF000000' } };
 
         groupHeaderRow.getCell(59).value = 'FASILITAS';
         sheet.mergeCells(1, 59, 1, 60);
-        groupHeaderRow.getCell(59).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+        groupHeaderRow.getCell(59).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
+        groupHeaderRow.getCell(59).font = { bold: true, color: { argb: 'FF000000' } };
 
         groupHeaderRow.height = 25;
-        groupHeaderRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        groupHeaderRow.getCell(59).font = { bold: true, color: { argb: 'FF000000' } }; // Yellow bg needs black text
-        groupHeaderRow.alignment = { horizontal: 'center', vertical: 'middle' };
+        groupHeaderRow.eachCell((cell) => {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        });
 
         const colHeaderRow = sheet.getRow(2);
         colHeaderRow.font = { bold: true };
+        colHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
         colHeaderRow.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
         const getAge = (dob) => {
@@ -441,16 +447,22 @@ exports.exportPatientInOut = async (req, res) => {
         });
 
         // Add thin borders to all data and header cells
-        sheet.eachRow((row, rowNumber) => {
-            row.eachCell((cell) => {
+        sheet.eachRow((row) => {
+            row.eachCell({ includeEmpty: true }, (cell) => {
                 cell.border = {
                     top: { style: 'thin' },
                     left: { style: 'thin' },
                     bottom: { style: 'thin' },
                     right: { style: 'thin' }
                 };
+                cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
             });
         });
+
+        // Specific alignment for address/name columns
+        sheet.getColumn('p_name').alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+        sheet.getColumn('p_address').alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+        sheet.getColumn('rs_asal').alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
 
         sheet.getColumn('rs_masuk').numFmt = 'dd/mm/yyyy';
         sheet.getColumn('rs_keluar').numFmt = 'dd/mm/yyyy';
@@ -514,21 +526,20 @@ exports.exportAmbulanceUsage = async (req, res) => {
 
         sheet.columns = [
             { header: 'No', key: 'no', width: 6 },
-            { header: 'No Polisi', key: 'plate_number', width: 16 },
-            { header: 'Kendaraan', key: 'vehicle_model', width: 22 },
-            { header: 'Driver', key: 'driver', width: 20 },
-            { header: 'Tujuan', key: 'destination', width: 30 },
-            { header: 'Nama Pasien', key: 'patient_name', width: 26 },
-            { header: 'No Registrasi', key: 'registration_number', width: 20 },
-            { header: 'Kondisi BBM (Berangkat)', key: 'fuel_cond', width: 20 },
-            { header: 'Isi BBM (Berangkat)', key: 'fuel_filled', width: 20 },
-            { header: 'Biaya BBM Akhir', key: 'fuel', width: 15 },
+            { header: 'No Polisi', key: 'plate_number', width: 15 },
+            { header: 'Kendaraan', key: 'vehicle_model', width: 18 },
+            { header: 'Driver', key: 'driver', width: 15 },
+            { header: 'Tujuan', key: 'destination', width: 20 },
+            { header: 'Nama Pasien', key: 'patient_name', width: 25 },
+            { header: 'No Registrasi', key: 'registration_number', width: 22 },
+            { header: 'Kondisi BBM (Berangkat)', key: 'fuel_cond', width: 18 },
+            { header: 'Isi BBM (Berangkat)', key: 'fuel_filled', width: 18 },
             { header: 'Berangkat', key: 'departure', width: 20 },
             { header: 'Kembali', key: 'return', width: 20 },
             { header: 'KM Berangkat', key: 'km_start', width: 15 },
             { header: 'KM Pulang', key: 'km_end', width: 15 },
-            { header: 'Status', key: 'status', width: 15 },
-            { header: 'Dokumentasi', key: 'docs', width: 25 }
+            { header: 'Status', key: 'status', width: 12 },
+            { header: 'Dokumentasi', key: 'docs', width: 15 }
         ];
 
         rows.forEach((row, index) => {
@@ -544,7 +555,6 @@ exports.exportAmbulanceUsage = async (req, res) => {
                 registration_number: row.registration_number || '-',
                 fuel_cond: row.fuel_condition || '-',
                 fuel_filled: row.fuel_filled || '-',
-                fuel: row.fuel_cost || 0,
                 departure: row.departure_time ? new Date(row.departure_time).toLocaleString('id-ID') : '-',
                 return: row.return_time ? new Date(row.return_time).toLocaleString('id-ID') : '-',
                 km_start: row.km_start || 0,
@@ -554,8 +564,38 @@ exports.exportAmbulanceUsage = async (req, res) => {
             });
         });
 
-        sheet.getRow(1).font = { bold: true };
-        sheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
+        // Header Styling
+        const headerRow = sheet.getRow(1);
+        headerRow.height = 30;
+        headerRow.eachCell((cell) => {
+            cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFDEE6F0' }
+            };
+            cell.font = { bold: true };
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            cell.border = {
+                top: { style: 'thin' },
+                left: { style: 'thin' },
+                bottom: { style: 'thin' },
+                right: { style: 'thin' }
+            };
+        });
+
+        // Data Cell Styling
+        sheet.eachRow((row, rowNumber) => {
+            if (rowNumber <= 1) return;
+            row.eachCell((cell) => {
+                cell.border = {
+                    top: { style: 'thin' },
+                    left: { style: 'thin' },
+                    bottom: { style: 'thin' },
+                    right: { style: 'thin' }
+                };
+                cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            });
+        });
         
         res.setHeader(
             'Content-Type',
