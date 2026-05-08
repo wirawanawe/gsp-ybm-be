@@ -30,23 +30,28 @@ exports.getDocumentation = async (req, res) => {
 /** POST /api/documentation */
 exports.createDocumentation = async (req, res) => {
     try {
-        const { title, description, file_type, activity_id } = req.body;
-        const file = req.file;
+        const { title, description, activity_id } = req.body;
+        const files = req.files;
 
-        if (!title || !file_type || !file) {
-            return res.status(400).json({ message: 'Title, file_type, dan file wajib diisi' });
+        if (!title || !files || files.length === 0) {
+            return res.status(400).json({ message: 'Title dan minimal satu file wajib diisi' });
         }
 
-        const file_url = `/uploads/${file.filename}`;
+        const results = [];
+        for (const file of files) {
+            const file_url = `/uploads/${file.filename}`;
+            const file_type = file.mimetype.startsWith('video') ? 'video' : 'photo';
 
-        const [result] = await db.query(
-            `INSERT INTO Documentation (title, description, file_url, file_type, activity_id, created_by)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [title, description || null, file_url, file_type, activity_id || null, req.user?.id || null]
-        );
+            const [result] = await db.query(
+                `INSERT INTO Documentation (title, description, file_url, file_type, activity_id, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [title, description || null, file_url, file_type, activity_id || null, req.user?.id || null]
+            );
+            results.push(result.insertId);
+        }
 
-        const [rows] = await db.query('SELECT * FROM Documentation WHERE id = ?', [result.insertId]);
-        res.status(201).json(rows[0]);
+        const [rows] = await db.query('SELECT * FROM Documentation WHERE id IN (?)', [results]);
+        res.status(201).json(rows);
     } catch (err) {
         console.error('createDocumentation error:', err);
         res.status(500).json({ message: 'Gagal menambah dokumentasi' });

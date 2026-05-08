@@ -40,7 +40,7 @@ const upload = multer({
 router.use(authMiddleware);
 
 router.get('/', documentationController.getDocumentation);
-router.post('/', upload.single('file'), documentationController.createDocumentation);
+router.post('/', upload.array('files', 20), documentationController.createDocumentation);
 router.put('/:id', documentationController.updateDocumentation);
 router.delete('/:id', documentationController.deleteDocumentation);
 

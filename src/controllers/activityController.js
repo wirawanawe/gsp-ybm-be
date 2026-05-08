@@ -314,7 +314,7 @@ exports.getUpcomingSchedules = async (req, res) => {
 /** GET /api/reports/activity — Laporan kegiatan & presensi (filtered by date) */
 exports.getActivityReport = async (req, res) => {
     try {
-        const { start_date, end_date } = req.query;
+        const { start_date, end_date, activity_id } = req.query;
         let sql = `
             SELECT a.*, s.title AS activity_title, s.type AS activity_type, p.name AS patient_name
             FROM ActivityAttendance a
@@ -325,8 +325,9 @@ exports.getActivityReport = async (req, res) => {
         const params = [];
         if (start_date) { sql += ' AND a.attendance_date >= ?'; params.push(start_date); }
         if (end_date)   { sql += ' AND a.attendance_date <= ?'; params.push(end_date); }
+        if (activity_id) { sql += ' AND a.schedule_id = ?'; params.push(activity_id); }
         
-        sql += ' ORDER BY a.attendance_date DESC, s.title ASC';
+        sql += ' ORDER BY s.title ASC, a.attendance_date ASC';
         
         const [rows] = await db.query(sql, params);
         res.json(rows);
@@ -339,7 +340,7 @@ exports.getActivityReport = async (req, res) => {
 /** GET /api/reports/activity/export — Export laporan kegiatan ke Excel */
 exports.exportActivityReport = async (req, res) => {
     try {
-        const { start_date, end_date } = req.query;
+        const { start_date, end_date, activity_id } = req.query;
         let sql = `
             SELECT a.*, s.title AS activity_title, s.type AS activity_type, p.name AS patient_name
             FROM ActivityAttendance a
@@ -350,8 +351,9 @@ exports.exportActivityReport = async (req, res) => {
         const params = [];
         if (start_date) { sql += ' AND a.attendance_date >= ?'; params.push(start_date); }
         if (end_date)   { sql += ' AND a.attendance_date <= ?'; params.push(end_date); }
+        if (activity_id) { sql += ' AND a.schedule_id = ?'; params.push(activity_id); }
         
-        sql += ' ORDER BY a.attendance_date ASC, s.title ASC';
+        sql += ' ORDER BY s.title ASC, a.attendance_date ASC';
         
         const [rows] = await db.query(sql, params);
 
