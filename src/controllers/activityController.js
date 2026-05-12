@@ -318,7 +318,7 @@ exports.getActivityReport = async (req, res) => {
     try {
         const { start_date, end_date, activity_id } = req.query;
         let sql = `
-            SELECT a.*, s.title AS activity_title, s.type AS activity_type, p.name AS patient_name
+            SELECT a.*, CAST(a.attendance_date AS CHAR) as att_date_str, s.title AS activity_title, s.type AS activity_type, p.name AS patient_name
             FROM ActivityAttendance a
             JOIN ActivitySchedules s ON a.schedule_id = s.id
             LEFT JOIN Patients p ON a.patient_id = p.id
@@ -344,7 +344,7 @@ exports.exportActivityReport = async (req, res) => {
     try {
         const { start_date, end_date, activity_id } = req.query;
         let sql = `
-            SELECT a.*, s.title AS activity_title, s.type AS activity_type, p.name AS patient_name
+            SELECT a.*, CAST(a.attendance_date AS CHAR) as att_date_str, s.title AS activity_title, s.type AS activity_type, p.name AS patient_name
             FROM ActivityAttendance a
             JOIN ActivitySchedules s ON a.schedule_id = s.id
             LEFT JOIN Patients p ON a.patient_id = p.id
@@ -364,17 +364,55 @@ exports.exportActivityReport = async (req, res) => {
         let docsMap = {};
         if (scheduleIds.length > 0) {
             const [docRows] = await db.query(
-                `SELECT activity_id, file_url, created_at, activity_date 
+                `SELECT activity_id, file_url, created_at, CAST(activity_date AS CHAR) as act_date_str 
                  FROM Documentation 
                  WHERE activity_id IN (?) AND file_type = 'photo'
-                 ORDER BY created_at DESC`,
+                 ORDER BY created_at ASC`,
                 [scheduleIds]
             );
+
+            // Fetch ALL attendance dates for these activities to ensure fallback mapping is accurate
+            // regardless of the current date filters applied to the report.
+            const [allAttendanceRows] = await db.query(
+                `SELECT schedule_id, CAST(attendance_date AS CHAR) as att_date_str 
+                 FROM ActivityAttendance 
+                 WHERE schedule_id IN (?)`,
+                [scheduleIds]
+            );
+
+            const attendanceDatesPerSchedule = {};
+            allAttendanceRows.forEach(r => {
+                if (!attendanceDatesPerSchedule[r.schedule_id]) {
+                    attendanceDatesPerSchedule[r.schedule_id] = new Set();
+                }
+                attendanceDatesPerSchedule[r.schedule_id].add(r.att_date_str);
+            });
+
             docRows.forEach(d => {
-                // Use activity_date if available, otherwise fallback to created_at
-                const effectiveDate = d.activity_date ? new Date(d.activity_date) : new Date(d.created_at);
-                const dateKey = localDateStr(effectiveDate);
-                const key = `${d.activity_id}_${dateKey}`;
+                let dateKey = null;
+                const docActivityId = String(d.activity_id);
+
+                if (d.act_date_str) {
+                    dateKey = d.act_date_str;
+                } else {
+                    // Fallback to the closest attendance date on or before created_at
+                    const createdDate = new Date(d.created_at);
+                    const scheduleDates = Array.from(attendanceDatesPerSchedule[d.activity_id] || []);
+                    
+                    // Sort descending (latest first)
+                    scheduleDates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+                    
+                    // Find the latest attendance date that occurred before or on the photo creation time
+                    // We normalize the attendance date to midnight in the same timezone as createdDate for comparison
+                    const closestDate = scheduleDates.find(dateStr => {
+                        const attDate = new Date(dateStr);
+                        // Normalize attDate to midnight local time for a fair comparison with createdDate
+                        return attDate.getTime() <= createdDate.getTime();
+                    });
+
+                    dateKey = closestDate || localDateStr(createdDate);
+                }
+                const key = `${docActivityId}_${dateKey}`;
                 if (!docsMap[key]) docsMap[key] = [];
                 docsMap[key].push(d.file_url);
             });
@@ -383,14 +421,15 @@ exports.exportActivityReport = async (req, res) => {
         // Group data by session (Activity + Date)
         const sessionMap = {};
         rows.forEach(r => {
-            const dateStr = r.attendance_date ? localDateStr(new Date(r.attendance_date)) : 'no-date';
-            const key = `${r.schedule_id}_${dateStr}`;
+            const dateStr = r.att_date_str || 'no-date';
+            const key = `${String(r.schedule_id)}_${dateStr}`;
             if (!sessionMap[key]) {
                 sessionMap[key] = {
                     schedule_id: r.schedule_id,
                     title: r.activity_title,
                     type: r.activity_type,
                     date: r.attendance_date,
+                    date_str: dateStr,
                     participants: [],
                     notes: []
                 };
@@ -469,33 +508,39 @@ exports.exportActivityReport = async (req, res) => {
                 dataRow.getCell(1).alignment = { vertical: 'top', horizontal: 'center' };
 
                 // Handle Photo
-                const dateKey = session.date ? localDateStr(new Date(session.date)) : null;
-                const key = `${session.schedule_id}_${dateKey}`;
+                const key = `${String(session.schedule_id)}_${session.date_str}`;
                 const photos = docsMap[key] || [];
 
                 if (photos.length > 0) {
                     const photoUrl = photos[0];
                     try {
-                        if (!imageCache[photoUrl]) {
-                            const filePath = path.join(__dirname, '../../', photoUrl);
-                            if (fs.existsSync(filePath)) {
+                        let filePath = photoUrl;
+                        if (!path.isAbsolute(photoUrl) && !photoUrl.startsWith('/')) {
+                            filePath = '/' + photoUrl;
+                        }
+                        const absolutePath = path.join(__dirname, '../../', filePath);
+                        
+                        if (imageCache[photoUrl] === undefined) {
+                            if (fs.existsSync(absolutePath)) {
+                                const ext = path.extname(absolutePath).slice(1).toLowerCase() || 'png';
+                                const finalExt = ext === 'jpg' ? 'jpeg' : ext;
                                 const imageId = workbook.addImage({
-                                    buffer: fs.readFileSync(filePath),
-                                    extension: path.extname(filePath).slice(1).toLowerCase() || 'png',
+                                    buffer: fs.readFileSync(absolutePath),
+                                    extension: finalExt,
                                 });
                                 imageCache[photoUrl] = imageId;
                             }
                         }
 
-                        if (imageCache[photoUrl]) {
+                        if (imageCache[photoUrl] !== undefined) {
                             sheet.addImage(imageCache[photoUrl], {
                                 tl: { col: 4, row: currentRow - 2 },
-                                ext: { width: 300, height: 150 },
+                                br: { col: 5, row: currentRow - 1 },
                                 editAs: 'oneCell'
                             });
                         }
                     } catch (imgErr) {
-                        console.error('Error adding image:', imgErr);
+                        console.error('Error adding image to report:', imgErr);
                     }
                 }
             });
