@@ -5,7 +5,7 @@ const path = require('path');
 /** GET /api/documentation */
 exports.getDocumentation = async (req, res) => {
     try {
-        const { type, activity_id, attendance_id } = req.query;
+        const { type, activity_id } = req.query;
         let sql = 'SELECT d.*, s.title as activity_title FROM Documentation d LEFT JOIN ActivitySchedules s ON d.activity_id = s.id WHERE 1=1';
         const params = [];
 
@@ -16,10 +16,6 @@ exports.getDocumentation = async (req, res) => {
         if (activity_id) {
             sql += ' AND d.activity_id = ?';
             params.push(activity_id);
-        }
-        if (attendance_id) {
-            sql += ' AND d.attendance_id = ?';
-            params.push(attendance_id);
         }
 
         sql += ' ORDER BY d.created_at DESC';
@@ -34,7 +30,7 @@ exports.getDocumentation = async (req, res) => {
 /** POST /api/documentation */
 exports.createDocumentation = async (req, res) => {
     try {
-        const { title, description, activity_id, attendance_id } = req.body;
+        const { title, description, activity_id } = req.body;
         const files = req.files;
 
         if (!title || !files || files.length === 0) {
@@ -47,9 +43,9 @@ exports.createDocumentation = async (req, res) => {
             const file_type = file.mimetype.startsWith('video') ? 'video' : 'photo';
 
             const [result] = await db.query(
-                `INSERT INTO Documentation (title, description, file_url, file_type, activity_id, attendance_id, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [title, description || null, file_url, file_type, activity_id || null, attendance_id || null, req.user?.id || null]
+                `INSERT INTO Documentation (title, description, file_url, file_type, activity_id, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [title, description || null, file_url, file_type, activity_id || null, req.user?.id || null]
             );
             results.push(result.insertId);
         }
@@ -66,11 +62,11 @@ exports.createDocumentation = async (req, res) => {
 exports.updateDocumentation = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, description, activity_id, attendance_id } = req.body;
+        const { title, description, activity_id } = req.body;
 
         await db.query(
-            `UPDATE Documentation SET title = ?, description = ?, activity_id = ?, attendance_id = ? WHERE id = ?`,
-            [title, description || null, activity_id || null, attendance_id || null, id]
+            `UPDATE Documentation SET title = ?, description = ?, activity_id = ? WHERE id = ?`,
+            [title, description || null, activity_id || null, id]
         );
 
         const [rows] = await db.query('SELECT * FROM Documentation WHERE id = ?', [id]);

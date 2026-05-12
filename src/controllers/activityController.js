@@ -1,5 +1,7 @@
 const db = require('../config/db');
 const ExcelJS = require('exceljs');
+const fs = require('fs');
+const path = require('path');
 
 // ─── ACTIVITY SCHEDULES ───────────────────────────────────────────────────────
 
@@ -356,55 +358,148 @@ exports.exportActivityReport = async (req, res) => {
         sql += ' ORDER BY s.title ASC, a.attendance_date ASC';
         
         const [rows] = await db.query(sql, params);
+        
+        // Fetch documentation for these activities
+        const scheduleIds = [...new Set(rows.map(r => r.schedule_id))];
+        let docsMap = {};
+        if (scheduleIds.length > 0) {
+            const [docRows] = await db.query(
+                `SELECT activity_id, file_url, created_at 
+                 FROM Documentation 
+                 WHERE activity_id IN (?) AND file_type = 'photo'
+                 ORDER BY created_at DESC`,
+                [scheduleIds]
+            );
+            docRows.forEach(d => {
+                const dateKey = localDateStr(new Date(d.created_at));
+                const key = `${d.activity_id}_${dateKey}`;
+                if (!docsMap[key]) docsMap[key] = [];
+                docsMap[key].push(d.file_url);
+            });
+        }
+
+        // Group data by session (Activity + Date)
+        const sessionMap = {};
+        rows.forEach(r => {
+            const dateStr = r.attendance_date ? localDateStr(new Date(r.attendance_date)) : 'no-date';
+            const key = `${r.schedule_id}_${dateStr}`;
+            if (!sessionMap[key]) {
+                sessionMap[key] = {
+                    schedule_id: r.schedule_id,
+                    title: r.activity_title,
+                    type: r.activity_type,
+                    date: r.attendance_date,
+                    participants: [],
+                    notes: []
+                };
+            }
+            sessionMap[key].participants.push({
+                name: r.participant_name,
+                type: r.participant_type,
+                status: r.status
+            });
+            if (r.notes) sessionMap[key].notes.push(r.notes);
+        });
 
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('Laporan Kegiatan');
 
         sheet.columns = [
-            { header: 'Tanggal', key: 'date', width: 15 },
-            { header: 'Nama Kegiatan', key: 'title', width: 30 },
-            { header: 'Tipe', key: 'type', width: 15 },
-            { header: 'Peserta', key: 'participant', width: 25 },
-            { header: 'Kategori', key: 'category', width: 15 },
-            { header: 'Status', key: 'status', width: 12 },
-            { header: 'Keterangan', key: 'notes', width: 30 }
+            { key: 'date', width: 15 },
+            { key: 'peserta', width: 20 },
+            { key: 'status', width: 15 },
+            { key: 'notes', width: 20 },
+            { key: 'photo', width: 45 }
         ];
 
-        rows.forEach(r => {
-            sheet.addRow({
-                date: r.attendance_date ? new Date(r.attendance_date).toLocaleDateString('id-ID') : '-',
-                title: r.activity_title || '-',
-                type: r.activity_type || '-',
-                participant: r.participant_name || '-',
-                category: r.participant_type || '-',
-                status: r.status || '-',
-                notes: r.notes || '-'
-            });
+        const imageCache = {};
+        let currentRow = 1;
+
+        // Group by Activity Title to show sections
+        const activityGroups = {};
+        Object.values(sessionMap).forEach(s => {
+            if (!activityGroups[s.title]) activityGroups[s.title] = [];
+            activityGroups[s.title].push(s);
         });
 
-        // Styling
-        const headerRow = sheet.getRow(1);
-        headerRow.height = 30;
-        headerRow.eachCell((cell) => {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDEE6F0' } };
-            cell.font = { bold: true };
-            cell.alignment = { vertical: 'middle', horizontal: 'center' };
-            cell.border = {
-                top: { style: 'thin' }, left: { style: 'thin' },
-                bottom: { style: 'thin' }, right: { style: 'thin' }
-            };
-        });
-
-        sheet.eachRow((row, rowNumber) => {
-            if (rowNumber === 1) return;
-            row.eachCell({ includeEmpty: true }, (cell) => {
+        for (const title in activityGroups) {
+            // Activity Title Heading
+            const titleRow = sheet.getRow(currentRow++);
+            titleRow.getCell(1).value = title;
+            titleRow.getCell(1).font = { bold: true, size: 12, color: { argb: 'FF006600' } };
+            
+            // Table Header
+            const headerRow = sheet.getRow(currentRow++);
+            headerRow.values = ['Tanggal', 'Peserta', 'Status', 'Keterangan', 'Dokumentasi'];
+            headerRow.height = 25;
+            headerRow.eachCell((cell) => {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDEE6F0' } };
+                cell.font = { bold: true };
+                cell.alignment = { vertical: 'middle', horizontal: 'center' };
                 cell.border = {
                     top: { style: 'thin' }, left: { style: 'thin' },
                     bottom: { style: 'thin' }, right: { style: 'thin' }
                 };
-                cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
             });
-        });
+
+            // Session Rows
+            activityGroups[title].forEach(session => {
+                const dateVal = session.date ? new Date(session.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }) : '-';
+                const participantsList = session.participants.map(p => p.name).join('\n');
+                const statusList = session.participants.map(p => p.type).join('\n');
+                const notesList = [...new Set(session.notes)].join('\n') || '-';
+
+                const dataRow = sheet.getRow(currentRow++);
+                dataRow.values = [dateVal, participantsList, statusList, notesList, ''];
+                
+                // Adjust height for content and photo
+                const lineCount = Math.max(session.participants.length, 1);
+                dataRow.height = Math.max(120, lineCount * 18);
+
+                dataRow.eachCell((cell) => {
+                    cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
+                    cell.border = {
+                        top: { style: 'thin' }, left: { style: 'thin' },
+                        bottom: { style: 'thin' }, right: { style: 'thin' }
+                    };
+                });
+                // Center date cell
+                dataRow.getCell(1).alignment = { vertical: 'top', horizontal: 'center' };
+
+                // Handle Photo
+                const dateKey = session.date ? localDateStr(new Date(session.date)) : null;
+                const key = `${session.schedule_id}_${dateKey}`;
+                const photos = docsMap[key] || [];
+
+                if (photos.length > 0) {
+                    const photoUrl = photos[0];
+                    try {
+                        if (!imageCache[photoUrl]) {
+                            const filePath = path.join(__dirname, '../../', photoUrl);
+                            if (fs.existsSync(filePath)) {
+                                const imageId = workbook.addImage({
+                                    buffer: fs.readFileSync(filePath),
+                                    extension: path.extname(filePath).slice(1).toLowerCase() || 'png',
+                                });
+                                imageCache[photoUrl] = imageId;
+                            }
+                        }
+
+                        if (imageCache[photoUrl]) {
+                            sheet.addImage(imageCache[photoUrl], {
+                                tl: { col: 4, row: currentRow - 2 },
+                                ext: { width: 300, height: 150 },
+                                editAs: 'oneCell'
+                            });
+                        }
+                    } catch (imgErr) {
+                        console.error('Error adding image:', imgErr);
+                    }
+                }
+            });
+
+            currentRow++; // Empty row after each activity group
+        }
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="Laporan_Kegiatan.xlsx"`);
