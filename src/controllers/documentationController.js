@@ -30,7 +30,7 @@ exports.getDocumentation = async (req, res) => {
 /** POST /api/documentation */
 exports.createDocumentation = async (req, res) => {
     try {
-        const { title, description, activity_id } = req.body;
+        const { title, description, activity_id, activity_date } = req.body;
         const files = req.files;
 
         if (!title || !files || files.length === 0) {
@@ -43,9 +43,9 @@ exports.createDocumentation = async (req, res) => {
             const file_type = file.mimetype.startsWith('video') ? 'video' : 'photo';
 
             const [result] = await db.query(
-                `INSERT INTO Documentation (title, description, file_url, file_type, activity_id, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [title, description || null, file_url, file_type, activity_id || null, req.user?.id || null]
+                `INSERT INTO Documentation (title, description, file_url, file_type, activity_id, activity_date, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [title, description || null, file_url, file_type, activity_id || null, activity_date || null, req.user?.id || null]
             );
             results.push(result.insertId);
         }

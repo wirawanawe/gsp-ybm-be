@@ -364,14 +364,16 @@ exports.exportActivityReport = async (req, res) => {
         let docsMap = {};
         if (scheduleIds.length > 0) {
             const [docRows] = await db.query(
-                `SELECT activity_id, file_url, created_at 
+                `SELECT activity_id, file_url, created_at, activity_date 
                  FROM Documentation 
                  WHERE activity_id IN (?) AND file_type = 'photo'
                  ORDER BY created_at DESC`,
                 [scheduleIds]
             );
             docRows.forEach(d => {
-                const dateKey = localDateStr(new Date(d.created_at));
+                // Use activity_date if available, otherwise fallback to created_at
+                const effectiveDate = d.activity_date ? new Date(d.activity_date) : new Date(d.created_at);
+                const dateKey = localDateStr(effectiveDate);
                 const key = `${d.activity_id}_${dateKey}`;
                 if (!docsMap[key]) docsMap[key] = [];
                 docsMap[key].push(d.file_url);
