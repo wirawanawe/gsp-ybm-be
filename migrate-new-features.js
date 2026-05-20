@@ -42,7 +42,7 @@ async function migrate() {
         id INT AUTO_INCREMENT PRIMARY KEY,
         schedule_id INT NOT NULL,
         participant_name VARCHAR(255) NOT NULL,
-        participant_type ENUM('Pasien', 'Penunggu', 'Umum') DEFAULT 'Umum',
+        participant_type VARCHAR(100) DEFAULT 'Umum',
         patient_id INT NULL,
         attendance_date DATE NOT NULL,
         status ENUM('Hadir', 'Tidak Hadir', 'Izin') DEFAULT 'Hadir',

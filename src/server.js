@@ -84,6 +84,7 @@ const financeRoutes = require('./routes/finance');
 const documentationRoutes = require('./routes/documentation');
 const heroSliderRoutes = require('./routes/heroSliders');
 const accountCodeRoutes = require('./routes/accountCodes');
+const presenceCategoryRoutes = require('./routes/presenceCategories');
 
 
 // const stayRoutes = require('./routes/stays');
@@ -102,6 +103,7 @@ app.use('/api/finance', financeRoutes);
 app.use('/api/documentation', documentationRoutes);
 app.use('/api/hero-sliders', heroSliderRoutes);
 app.use('/api/account-codes', accountCodeRoutes);
+app.use('/api/presence-categories', presenceCategoryRoutes);
 
 
 // app.use('/api/stays', stayRoutes);
