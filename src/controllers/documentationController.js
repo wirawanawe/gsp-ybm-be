@@ -5,7 +5,7 @@ const path = require('path');
 /** GET /api/documentation */
 exports.getDocumentation = async (req, res) => {
     try {
-        const { type, activity_id } = req.query;
+        const { type, activity_id, activity_date } = req.query;
         let sql = 'SELECT d.*, s.title as activity_title FROM Documentation d LEFT JOIN ActivitySchedules s ON d.activity_id = s.id WHERE 1=1';
         const params = [];
 
@@ -16,6 +16,10 @@ exports.getDocumentation = async (req, res) => {
         if (activity_id) {
             sql += ' AND d.activity_id = ?';
             params.push(activity_id);
+        }
+        if (activity_date) {
+            sql += ' AND d.activity_date = ?';
+            params.push(activity_date);
         }
 
         sql += ' ORDER BY d.created_at DESC';
