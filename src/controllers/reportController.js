@@ -144,7 +144,7 @@ exports.getAmbulanceUsage = async (req, res) => {
             `SELECT 
                 al.id, al.ambulance_id, al.destination, al.departure_time, al.return_time, al.status,
                 a.plate_number, a.vehicle_model,
-                p.name AS patient_name, p.registration_number
+                p.name AS patient_name, p.registration_number, al.patient_id
              FROM AmbulanceLogs al
              JOIN Ambulances a ON a.id = al.ambulance_id
              LEFT JOIN Patients p ON p.id = al.patient_id
@@ -152,6 +152,27 @@ exports.getAmbulanceUsage = async (req, res) => {
              ORDER BY al.departure_time DESC`,
             params
         );
+
+        for (const row of rows) {
+            const [patients] = await db.query(
+                `SELECT p.id, p.name AS patient_name, p.registration_number, alp.destination, alp.document_path 
+                 FROM AmbulanceLogPatients alp 
+                 JOIN Patients p ON p.id = alp.patient_id 
+                 WHERE alp.ambulance_log_id = ?`,
+                [row.id]
+            );
+            if (patients.length === 0 && row.patient_id) {
+                row.patients = [{
+                    id: row.patient_id,
+                    patient_name: row.patient_name,
+                    registration_number: row.registration_number,
+                    destination: row.destination
+                }];
+            } else {
+                row.patients = patients;
+            }
+        }
+
         setCache(cacheKey, rows, 60);
         res.json(rows);
     } catch (error) {
@@ -544,7 +565,7 @@ exports.exportAmbulanceUsage = async (req, res) => {
                 al.id, al.ambulance_id, al.destination, al.departure_time, al.return_time, al.status,
                 al.km_start, al.km_end, al.driver_name, al.fuel_cost, al.fuel_condition, al.fuel_filled,
                 a.plate_number, a.vehicle_model,
-                p.name AS patient_name, p.registration_number
+                p.name AS patient_name, p.registration_number, al.patient_id
              FROM AmbulanceLogs al
              JOIN Ambulances a ON a.id = al.ambulance_id
              LEFT JOIN Patients p ON p.id = al.patient_id
@@ -553,16 +574,25 @@ exports.exportAmbulanceUsage = async (req, res) => {
             params
         );
 
-        // Fetch documentation (patient logs) for these logs
+        // Fetch patients for these logs
         for (const row of rows) {
             const [patients] = await db.query(
-                `SELECT p.name, p.registration_number, alp.document_path 
+                `SELECT p.name AS patient_name, p.registration_number, alp.destination, alp.document_path 
                  FROM AmbulanceLogPatients alp 
                  JOIN Patients p ON p.id = alp.patient_id 
                  WHERE alp.ambulance_log_id = ?`,
                 [row.id]
             );
-            row.documentation = patients;
+            if (patients.length === 0 && row.patient_id) {
+                row.patients = [{
+                    patient_name: row.patient_name,
+                    registration_number: row.registration_number,
+                    destination: row.destination,
+                    document_path: null
+                }];
+            } else {
+                row.patients = patients;
+            }
         }
 
         const workbook = new ExcelJS.Workbook();
@@ -573,7 +603,7 @@ exports.exportAmbulanceUsage = async (req, res) => {
             { header: 'No Polisi', key: 'plate_number', width: 15 },
             { header: 'Kendaraan', key: 'vehicle_model', width: 18 },
             { header: 'Driver', key: 'driver', width: 15 },
-            { header: 'Tujuan', key: 'destination', width: 20 },
+            { header: 'Tujuan', key: 'destination', width: 30 },
             { header: 'Nama Pasien', key: 'patient_name', width: 25 },
             { header: 'No Registrasi', key: 'registration_number', width: 22 },
             { header: 'Kondisi BBM (Berangkat)', key: 'fuel_cond', width: 18 },
@@ -587,16 +617,19 @@ exports.exportAmbulanceUsage = async (req, res) => {
         ];
 
         rows.forEach((row, index) => {
-            const docsList = row.documentation?.map(d => d.document_path ? 'Ada' : 'Tidak Ada').join(', ') || '-';
+            const patientsList = row.patients?.map(p => p.patient_name).join('\n') || row.patient_name || '-';
+            const regList = row.patients?.map(p => p.registration_number || '-').join('\n') || row.registration_number || '-';
+            const destList = row.patients?.map(p => row.patients.length > 1 ? `${p.destination || row.destination || '-'} (${p.patient_name})` : (p.destination || row.destination || '-')).join('\n') || row.destination || '-';
+            const docsList = row.patients?.map(p => p.document_path ? 'Ada' : 'Tidak Ada').join('\n') || '-';
             
             sheet.addRow({
                 no: index + 1,
                 plate_number: row.plate_number,
                 vehicle_model: row.vehicle_model,
                 driver: row.driver_name || '-',
-                destination: row.destination,
-                patient_name: row.patient_name || '-',
-                registration_number: row.registration_number || '-',
+                destination: destList,
+                patient_name: patientsList,
+                registration_number: regList,
                 fuel_cond: row.fuel_condition || '-',
                 fuel_filled: row.fuel_filled || '-',
                 departure: row.departure_time ? new Date(row.departure_time).toLocaleString('id-ID') : '-',
