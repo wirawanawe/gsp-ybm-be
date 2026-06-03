@@ -49,7 +49,7 @@ exports.getOccupancyStats = async (req, res) => {
 // Masih mendukung ?date=YYYY-MM-DD untuk kompatibilitas lama.
 // Laporan pasien masuk dan keluar per rentang tanggal (berdasarkan tanggal masuk/keluar).
 exports.getPatientInOut = async (req, res) => {
-    const { date, start_date, end_date, final_status } = req.query;
+    const { date, start_date, end_date, final_status, date_type } = req.query;
     // Backward compatibility: jika hanya ada ?date lama, pakai sebagai from/to
     let from = start_date || date || '';
     let to = end_date || date || '';
@@ -57,7 +57,7 @@ exports.getPatientInOut = async (req, res) => {
     if (to && !from) from = to;
 
     try {
-        const cacheKey = `report:patient-in-out:${JSON.stringify({ from, to, final_status })}`;
+        const cacheKey = `report:patient-in-out:${JSON.stringify({ from, to, final_status, date_type })}`;
         const cached = getCache(cacheKey);
         if (cached) {
             return res.json(cached);
@@ -66,8 +66,16 @@ exports.getPatientInOut = async (req, res) => {
         const params = [];
 
         if (from && to) {
-            whereClause += ' AND ((DATE(s.check_in_date) BETWEEN ? AND ?) OR (DATE(s.check_out_date) BETWEEN ? AND ?))';
-            params.push(from, to, from, to);
+            if (date_type === 'check_in') {
+                whereClause += ' AND DATE(s.check_in_date) BETWEEN ? AND ?';
+                params.push(from, to);
+            } else if (date_type === 'check_out') {
+                whereClause += ' AND DATE(s.check_out_date) BETWEEN ? AND ?';
+                params.push(from, to);
+            } else {
+                whereClause += ' AND ((DATE(s.check_in_date) BETWEEN ? AND ?) OR (DATE(s.check_out_date) BETWEEN ? AND ?))';
+                params.push(from, to, from, to);
+            }
         }
         if (final_status) {
             if (final_status === 'Masih dirawat' || final_status === 'null') {
@@ -105,19 +113,33 @@ exports.getPatientInOut = async (req, res) => {
 // Masih mendukung ?date=YYYY-MM-DD untuk kompatibilitas lama.
 // Laporan penggunaan ambulans per rentang tanggal (berdasarkan tanggal berangkat).
 exports.getAmbulanceUsage = async (req, res) => {
-    const { date, start_date, end_date } = req.query;
+    const { date, start_date, end_date, date_type } = req.query;
     let from = start_date || date || '';
     let to = end_date || date || '';
     if (from && !to) to = from;
     if (to && !from) from = to;
 
     try {
-        const cacheKey = `report:ambulance-usage:${JSON.stringify({ from, to })}`;
+        const cacheKey = `report:ambulance-usage:${JSON.stringify({ from, to, date_type })}`;
         const cached = getCache(cacheKey);
         if (cached) {
             return res.json(cached);
         }
         const hasDate = from && to;
+        let dateWhereClause = '';
+        const params = [];
+        if (hasDate) {
+            if (date_type === 'departure') {
+                dateWhereClause = 'WHERE DATE(al.departure_time) BETWEEN ? AND ?';
+                params.push(from, to);
+            } else if (date_type === 'return') {
+                dateWhereClause = 'WHERE DATE(al.return_time) BETWEEN ? AND ?';
+                params.push(from, to);
+            } else {
+                dateWhereClause = 'WHERE (DATE(al.departure_time) BETWEEN ? AND ? OR DATE(al.return_time) BETWEEN ? AND ?)';
+                params.push(from, to, from, to);
+            }
+        }
         const [rows] = await db.query(
             `SELECT 
                 al.id, al.ambulance_id, al.destination, al.departure_time, al.return_time, al.status,
@@ -126,9 +148,9 @@ exports.getAmbulanceUsage = async (req, res) => {
              FROM AmbulanceLogs al
              JOIN Ambulances a ON a.id = al.ambulance_id
              LEFT JOIN Patients p ON p.id = al.patient_id
-             ${hasDate ? 'WHERE DATE(al.departure_time) BETWEEN ? AND ?' : ''}
+             ${dateWhereClause}
              ORDER BY al.departure_time DESC`,
-            hasDate ? [from, to] : []
+            params
         );
         setCache(cacheKey, rows, 60);
         res.json(rows);
@@ -141,7 +163,7 @@ exports.getAmbulanceUsage = async (req, res) => {
 // GET /api/reports/patient-in-out/export?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
 // Jika tanggal tidak diisi, export semua data.
 exports.exportPatientInOut = async (req, res) => {
-    const { date, start_date, end_date, final_status } = req.query;
+    const { date, start_date, end_date, final_status, date_type } = req.query;
     let from = start_date || date || '';
     let to = end_date || date || '';
     if (from && !to) to = from;
@@ -152,8 +174,16 @@ exports.exportPatientInOut = async (req, res) => {
         const params = [];
 
         if (from && to) {
-            whereClause += ' AND ((DATE(s.check_in_date) BETWEEN ? AND ?) OR (DATE(s.check_out_date) BETWEEN ? AND ?))';
-            params.push(from, to, from, to);
+            if (date_type === 'check_in') {
+                whereClause += ' AND DATE(s.check_in_date) BETWEEN ? AND ?';
+                params.push(from, to);
+            } else if (date_type === 'check_out') {
+                whereClause += ' AND DATE(s.check_out_date) BETWEEN ? AND ?';
+                params.push(from, to);
+            } else {
+                whereClause += ' AND ((DATE(s.check_in_date) BETWEEN ? AND ?) OR (DATE(s.check_out_date) BETWEEN ? AND ?))';
+                params.push(from, to, from, to);
+            }
         }
         if (final_status) {
             if (final_status === 'Masih dirawat' || final_status === 'null') {
@@ -487,7 +517,7 @@ exports.exportPatientInOut = async (req, res) => {
 
 // GET /api/reports/ambulance-usage/export?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
 exports.exportAmbulanceUsage = async (req, res) => {
-    const { date, start_date, end_date } = req.query;
+    const { date, start_date, end_date, date_type } = req.query;
     let from = start_date || date || '';
     let to = end_date || date || '';
     if (from && !to) to = from;
@@ -495,6 +525,20 @@ exports.exportAmbulanceUsage = async (req, res) => {
 
     try {
         const hasDate = from && to;
+        let dateWhereClause = '';
+        const params = [];
+        if (hasDate) {
+            if (date_type === 'departure') {
+                dateWhereClause = 'WHERE DATE(al.departure_time) BETWEEN ? AND ?';
+                params.push(from, to);
+            } else if (date_type === 'return') {
+                dateWhereClause = 'WHERE DATE(al.return_time) BETWEEN ? AND ?';
+                params.push(from, to);
+            } else {
+                dateWhereClause = 'WHERE (DATE(al.departure_time) BETWEEN ? AND ? OR DATE(al.return_time) BETWEEN ? AND ?)';
+                params.push(from, to, from, to);
+            }
+        }
         const [rows] = await db.query(
             `SELECT 
                 al.id, al.ambulance_id, al.destination, al.departure_time, al.return_time, al.status,
@@ -504,9 +548,9 @@ exports.exportAmbulanceUsage = async (req, res) => {
              FROM AmbulanceLogs al
              JOIN Ambulances a ON a.id = al.ambulance_id
              LEFT JOIN Patients p ON p.id = al.patient_id
-             ${hasDate ? 'WHERE DATE(al.departure_time) BETWEEN ? AND ?' : ''}
+             ${dateWhereClause}
              ORDER BY al.departure_time DESC`,
-            hasDate ? [from, to] : []
+            params
         );
 
         // Fetch documentation (patient logs) for these logs
@@ -654,6 +698,15 @@ exports.getDashboardSummary = async (req, res) => {
             "SELECT COUNT(*) AS total_ambulances FROM Ambulances"
         );
 
+        // Penunggu aktif (pendamping dari pasien yang masih dirawat)
+        const [[{ active_visitors }]] = await db.query(
+            "SELECT COUNT(DISTINCT visitor_id) AS active_visitors FROM StayLogVisitors slv JOIN StayLogs sl ON slv.stay_log_id = sl.id WHERE sl.final_status IS NULL"
+        );
+        // Total penunggu terdaftar
+        const [[{ total_visitors }]] = await db.query(
+            "SELECT COUNT(*) AS total_visitors FROM Visitors"
+        );
+
         res.json({
             patients: {
                 active: Number(active_patients),
@@ -671,6 +724,10 @@ exports.getDashboardSummary = async (req, res) => {
                 available: ambulanceSummary['Available'],
                 in_journey: ambulanceSummary['In-Journey'],
                 maintenance: ambulanceSummary['Maintenance'],
+            },
+            visitors: {
+                active: Number(active_visitors),
+                total: Number(total_visitors),
             },
         });
     } catch (error) {

@@ -47,6 +47,7 @@ router.post('/:id/documents', upload.fields([
     { name: 'sktm', maxCount: 1 },
     { name: 'rujukan', maxCount: 1 }
 ]), patientController.addPatientDocuments);
+router.delete('/:id/documents/:docId', patientController.deletePatientDocument);
 
 router.post('/register', upload.fields([
     { name: 'ktp', maxCount: 1 },

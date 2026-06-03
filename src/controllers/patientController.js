@@ -1,4 +1,6 @@
 const db = require('../config/db');
+const fs = require('fs');
+const path = require('path');
 
 // GET /api/patients/pending-count
 // Untuk notifikasi sidebar - jumlah pasien Pending verifikasi
@@ -472,5 +474,40 @@ exports.verifyPatient = async (req, res) => {
     } catch (error) {
         console.error('verifyPatient error:', error);
         res.status(500).json({ message: 'Gagal verifikasi pasien' });
+    }
+};
+
+// DELETE /api/patients/:id/documents/:docId
+// Hapus berkas persyaratan tertentu milik pasien
+exports.deletePatientDocument = async (req, res) => {
+    const { id, docId } = req.params;
+    try {
+        // 1. Dapatkan info file berkas untuk dihapus fisiknya
+        const [docs] = await db.query(
+            'SELECT * FROM Documents WHERE id = ? AND patient_id = ?',
+            [docId, id]
+        );
+
+        if (docs.length === 0) {
+            return res.status(404).json({ message: 'Berkas tidak ditemukan' });
+        }
+
+        const doc = docs[0];
+        
+        // 2. Hapus file fisik jika ada
+        if (doc.file_path) {
+            const absolutePath = path.join(process.cwd(), doc.file_path);
+            if (fs.existsSync(absolutePath)) {
+                fs.unlinkSync(absolutePath);
+            }
+        }
+
+        // 3. Hapus record dari database
+        await db.query('DELETE FROM Documents WHERE id = ?', [docId]);
+
+        res.json({ message: 'Berkas berhasil dihapus' });
+    } catch (error) {
+        console.error('deletePatientDocument error:', error);
+        res.status(500).json({ message: 'Gagal menghapus berkas' });
     }
 };
