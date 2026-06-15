@@ -49,7 +49,7 @@ exports.getOccupancyStats = async (req, res) => {
 // Masih mendukung ?date=YYYY-MM-DD untuk kompatibilitas lama.
 // Laporan pasien masuk dan keluar per rentang tanggal (berdasarkan tanggal masuk/keluar).
 exports.getPatientInOut = async (req, res) => {
-    const { date, start_date, end_date, final_status, date_type } = req.query;
+    const { date, start_date, end_date, final_status, date_type, name } = req.query;
     // Backward compatibility: jika hanya ada ?date lama, pakai sebagai from/to
     let from = start_date || date || '';
     let to = end_date || date || '';
@@ -57,7 +57,7 @@ exports.getPatientInOut = async (req, res) => {
     if (to && !from) from = to;
 
     try {
-        const cacheKey = `report:patient-in-out:${JSON.stringify({ from, to, final_status, date_type })}`;
+        const cacheKey = `report:patient-in-out:${JSON.stringify({ from, to, final_status, date_type, name })}`;
         const cached = getCache(cacheKey);
         if (cached) {
             return res.json(cached);
@@ -80,17 +80,23 @@ exports.getPatientInOut = async (req, res) => {
         if (final_status) {
             if (final_status === 'Masih dirawat' || final_status === 'null') {
                 whereClause += ' AND s.final_status IS NULL';
+            } else if (final_status === 'Aktif & Pulang') {
+                whereClause += " AND (s.final_status IS NULL OR s.final_status = 'Sembuh')";
             } else {
                 whereClause += ' AND s.final_status = ?';
                 params.push(final_status);
             }
+        }
+        if (name) {
+            whereClause += ' AND p.name LIKE ?';
+            params.push(`%${name}%`);
         }
 
         const [rows] = await db.query(
             `SELECT 
                 s.id, s.patient_id, s.bed_id, s.check_in_date, s.check_out_date, s.final_status,
                 s.departure_photo_path, s.transfer_reason,
-                p.name AS patient_name, p.registration_number, p.nik,
+                p.name AS patient_name, p.registration_number, p.nik, p.gender, p.kabupaten, p.disease_category,
                 b.bed_number, r.room_number
              FROM StayLogs s
              JOIN Patients p ON p.id = s.patient_id
@@ -184,7 +190,7 @@ exports.getAmbulanceUsage = async (req, res) => {
 // GET /api/reports/patient-in-out/export?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
 // Jika tanggal tidak diisi, export semua data.
 exports.exportPatientInOut = async (req, res) => {
-    const { date, start_date, end_date, final_status, date_type } = req.query;
+    const { date, start_date, end_date, final_status, date_type, name } = req.query;
     let from = start_date || date || '';
     let to = end_date || date || '';
     if (from && !to) to = from;
@@ -209,10 +215,16 @@ exports.exportPatientInOut = async (req, res) => {
         if (final_status) {
             if (final_status === 'Masih dirawat' || final_status === 'null') {
                 whereClause += ' AND s.final_status IS NULL';
+            } else if (final_status === 'Aktif & Pulang') {
+                whereClause += " AND (s.final_status IS NULL OR s.final_status = 'Sembuh')";
             } else {
                 whereClause += ' AND s.final_status = ?';
                 params.push(final_status);
             }
+        }
+        if (name) {
+            whereClause += ' AND p.name LIKE ?';
+            params.push(`%${name}%`);
         }
 
         const [rows] = await db.query(
@@ -695,10 +707,40 @@ exports.exportAmbulanceUsage = async (req, res) => {
 // Ringkasan untuk dashboard: jumlah pasien, ketersediaan kamar, status ambulans
 exports.getDashboardSummary = async (req, res) => {
     try {
-        // Pasien aktif (masih dirawat)
-        const [[{ active_patients }]] = await db.query(
-            "SELECT COUNT(DISTINCT patient_id) AS active_patients FROM StayLogs WHERE final_status IS NULL"
+        // Pasien aktif (masih dirawat) & gender split
+        const [activePatientsRows] = await db.query(
+            `SELECT p.gender, COUNT(DISTINCT s.patient_id) as count
+             FROM StayLogs s
+             JOIN Patients p ON p.id = s.patient_id
+             WHERE s.final_status IS NULL
+             GROUP BY p.gender`
         );
+        let active_patients = 0;
+        const active_patients_gender = { 'Laki-laki': 0, 'Perempuan': 0 };
+        for (const row of activePatientsRows) {
+            const count = Number(row.count);
+            active_patients += count;
+            if (row.gender === 'Laki-laki' || row.gender === 'Laki-Laki') active_patients_gender['Laki-laki'] += count;
+            if (row.gender === 'Perempuan') active_patients_gender['Perempuan'] += count;
+        }
+
+        // Pasien pulang & gender split
+        const [dischargedPatientsRows] = await db.query(
+            `SELECT p.gender, COUNT(DISTINCT s.patient_id) as count
+             FROM StayLogs s
+             JOIN Patients p ON p.id = s.patient_id
+             WHERE s.final_status IS NOT NULL
+             GROUP BY p.gender`
+        );
+        let discharged_patients = 0;
+        const discharged_patients_gender = { 'Laki-laki': 0, 'Perempuan': 0 };
+        for (const row of dischargedPatientsRows) {
+            const count = Number(row.count);
+            discharged_patients += count;
+            if (row.gender === 'Laki-laki' || row.gender === 'Laki-Laki') discharged_patients_gender['Laki-laki'] += count;
+            if (row.gender === 'Perempuan') discharged_patients_gender['Perempuan'] += count;
+        }
+
         // Total pasien terdaftar
         const [[{ total_patients }]] = await db.query(
             "SELECT COUNT(*) AS total_patients FROM Patients"
@@ -707,6 +749,28 @@ exports.getDashboardSummary = async (req, res) => {
         const [[{ pending_patients }]] = await db.query(
             "SELECT COUNT(*) AS pending_patients FROM PatientRegistrations WHERE status_verification = 'Pending'"
         );
+
+        // Distribusi Jenis Kelamin
+        const [genderRows] = await db.query(
+            "SELECT gender, COUNT(*) AS count FROM Patients GROUP BY gender"
+        );
+        const gender_distribution = { 'Laki-laki': 0, 'Perempuan': 0 };
+        for (const row of genderRows) {
+            if (row.gender === 'Laki-laki' || row.gender === 'Laki-Laki') gender_distribution['Laki-laki'] += Number(row.count);
+            if (row.gender === 'Perempuan') gender_distribution['Perempuan'] += Number(row.count);
+        }
+
+        // Kategori Penyakit
+        const [diseaseRows] = await db.query(
+            "SELECT disease_category, COUNT(*) AS count FROM Patients WHERE disease_category IS NOT NULL AND disease_category != '' GROUP BY disease_category ORDER BY count DESC"
+        );
+        const disease_categories = diseaseRows.map(row => ({ category: row.disease_category, count: Number(row.count) }));
+
+        // Asal Kota (Kabupaten)
+        const [cityRows] = await db.query(
+            "SELECT kabupaten, COUNT(*) AS count FROM Patients WHERE kabupaten IS NOT NULL AND kabupaten != '' GROUP BY kabupaten ORDER BY count DESC"
+        );
+        const patient_cities = cityRows.map(row => ({ city: row.kabupaten, count: Number(row.count) }));
 
         // Kamar: total beds & yang tersedia
         const [[{ total_beds }]] = await db.query(
@@ -743,8 +807,14 @@ exports.getDashboardSummary = async (req, res) => {
         res.json({
             patients: {
                 active: Number(active_patients),
+                active_gender: active_patients_gender,
+                discharged: Number(discharged_patients),
+                discharged_gender: discharged_patients_gender,
                 total: Number(total_patients),
                 pending: Number(pending_patients),
+                gender_distribution,
+                disease_categories,
+                cities: patient_cities
             },
             rooms: {
                 total_rooms: Number(total_rooms),

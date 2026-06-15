@@ -380,6 +380,84 @@ exports.checkIn = async (req, res) => {
     }
 };
 
+// PUT /api/rooms/stay/:id
+// Mengupdate data check-in (seperti tanggal masuk atau pasien) pada stay log yang masih aktif
+exports.updateStayLog = async (req, res) => {
+    const { id } = req.params;
+    const { check_in_date, patient_id, visitor_id } = req.body;
+    
+    try {
+        const [stays] = await db.query('SELECT * FROM StayLogs WHERE id = ?', [id]);
+        if (stays.length === 0) {
+            return res.status(404).json({ message: 'Data check-in tidak ditemukan' });
+        }
+        
+        const current = stays[0];
+        const newCheckInDate = check_in_date || current.check_in_date;
+        const newPatientId = patient_id || current.patient_id;
+        const userId = req.user?.id || null;
+
+        const connection = await db.getConnection();
+        await connection.beginTransaction();
+
+        try {
+            // Update the StayLog
+            await connection.query(
+                'UPDATE StayLogs SET check_in_date = ?, patient_id = ?, updated_by = ? WHERE id = ?',
+                [newCheckInDate, newPatientId, userId, id]
+            );
+            
+            // If patient changed, we might need to update the PatientRegistrations status
+            if (String(newPatientId) !== String(current.patient_id)) {
+                // Update old patient
+                await connection.query(
+                    "UPDATE PatientRegistrations SET status_rumah_singgah = 'Menunggu', updated_by = ? WHERE patient_id = ?",
+                    [userId, current.patient_id]
+                );
+                // Update new patient
+                await connection.query(
+                    "UPDATE PatientRegistrations SET status_rumah_singgah = 'Dirawat', updated_by = ? WHERE patient_id = ?",
+                    [userId, newPatientId]
+                );
+            }
+
+            if (visitor_id !== undefined) {
+                // Get current visitors for this stay
+                const [currVisitors] = await connection.query('SELECT visitor_id FROM StayLogVisitors WHERE stay_log_id = ?', [id]);
+                const currVids = currVisitors.map(v => v.visitor_id);
+                
+                // Set them to inactive
+                if (currVids.length > 0) {
+                    await connection.query('UPDATE Visitors SET is_active = FALSE WHERE id IN (?)', [currVids]);
+                }
+                
+                // Clear StayLogVisitors
+                await connection.query('DELETE FROM StayLogVisitors WHERE stay_log_id = ?', [id]);
+                
+                // Insert new visitor if provided
+                if (visitor_id) {
+                    await connection.query(
+                        'INSERT INTO StayLogVisitors (stay_log_id, visitor_id, created_by) VALUES (?, ?, ?)',
+                        [id, visitor_id, userId]
+                    );
+                    await connection.query('UPDATE Visitors SET is_active = TRUE WHERE id = ?', [visitor_id]);
+                }
+            }
+
+            await connection.commit();
+            res.json({ message: 'Data check-in berhasil diupdate' });
+        } catch (err) {
+            await connection.rollback();
+            throw err;
+        } finally {
+            connection.release();
+        }
+    } catch (error) {
+        console.error('updateStayLog error:', error);
+        res.status(500).json({ message: 'Gagal mengupdate data check-in' });
+    }
+};
+
 // POST /api/rooms/transfer
 // Pindah kamar: dari bed saat ini ke bed tujuan dengan alasan
 exports.transfer = async (req, res) => {
