@@ -148,7 +148,7 @@ exports.getAmbulanceUsage = async (req, res) => {
         }
         const [rows] = await db.query(
             `SELECT 
-                al.id, al.ambulance_id, al.destination, al.departure_time, al.return_time, al.status,
+                al.id, al.ambulance_id, al.destination, al.departure_time, al.return_time, al.status, al.km_start, al.km_end,
                 a.plate_number, a.vehicle_model,
                 p.name AS patient_name, p.registration_number, al.patient_id
              FROM AmbulanceLogs al

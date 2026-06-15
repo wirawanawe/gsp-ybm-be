@@ -27,6 +27,7 @@ const upload = multer({ storage: storage });
 // Ambulance Booking / Logs (harus di atas /:id agar /logs tidak tertangkap sebagai id)
 router.get('/logs', ambulanceLogController.getLogs);
 router.post('/logs', upload.any(), ambulanceLogController.createLog);
+router.put('/logs/:id', ambulanceLogController.updateLog);
 router.put('/logs/:id/complete', ambulanceLogController.completeLog);
 
 // Master Ambulance CRUD

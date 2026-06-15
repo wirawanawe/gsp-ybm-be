@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { clearCachePrefix } = require('../config/cache');
 
 // --- ROOMS API ---
 
@@ -384,7 +385,7 @@ exports.checkIn = async (req, res) => {
 // Mengupdate data check-in (seperti tanggal masuk atau pasien) pada stay log yang masih aktif
 exports.updateStayLog = async (req, res) => {
     const { id } = req.params;
-    const { check_in_date, patient_id, visitor_id } = req.body;
+    const { check_in_date, check_out_date, final_status, patient_id, visitor_id } = req.body;
     
     try {
         const [stays] = await db.query('SELECT * FROM StayLogs WHERE id = ?', [id]);
@@ -393,7 +394,9 @@ exports.updateStayLog = async (req, res) => {
         }
         
         const current = stays[0];
-        const newCheckInDate = check_in_date || current.check_in_date;
+        const newCheckInDate = check_in_date !== undefined ? check_in_date : current.check_in_date;
+        const newCheckOutDate = check_out_date !== undefined ? (check_out_date || null) : current.check_out_date;
+        const newFinalStatus = final_status !== undefined ? (final_status || null) : current.final_status;
         const newPatientId = patient_id || current.patient_id;
         const userId = req.user?.id || null;
 
@@ -403,8 +406,8 @@ exports.updateStayLog = async (req, res) => {
         try {
             // Update the StayLog
             await connection.query(
-                'UPDATE StayLogs SET check_in_date = ?, patient_id = ?, updated_by = ? WHERE id = ?',
-                [newCheckInDate, newPatientId, userId, id]
+                'UPDATE StayLogs SET check_in_date = ?, check_out_date = ?, final_status = ?, patient_id = ?, updated_by = ? WHERE id = ?',
+                [newCheckInDate, newCheckOutDate, newFinalStatus, newPatientId, userId, id]
             );
             
             // If patient changed, we might need to update the PatientRegistrations status
@@ -445,6 +448,8 @@ exports.updateStayLog = async (req, res) => {
             }
 
             await connection.commit();
+            clearCachePrefix('report:patient-in-out');
+            clearCachePrefix('report:dashboard-summary');
             res.json({ message: 'Data check-in berhasil diupdate' });
         } catch (err) {
             await connection.rollback();

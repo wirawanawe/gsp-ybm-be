@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { clearCachePrefix } = require('../config/cache');
 
 // GET /api/ambulance/logs
 // Mengembalikan daftar log dengan kolom extra: patients (array) dan patient_name (gabungan)
@@ -144,6 +145,8 @@ exports.createLog = async (req, res) => {
             );
 
             await connection.commit();
+            clearCachePrefix('report:ambulance-usage');
+            
             res.status(201).json({
                 message: 'Booking ambulans berhasil dibuat',
                 id: logId
@@ -211,6 +214,8 @@ exports.completeLog = async (req, res) => {
             );
 
             await connection.commit();
+            clearCachePrefix('report:ambulance-usage');
+            
             res.json({ message: 'Trip ambulans berhasil diselesaikan' });
         } catch (err) {
             await connection.rollback();
@@ -223,6 +228,36 @@ exports.completeLog = async (req, res) => {
         res
             .status(500)
             .json({ message: 'Terjadi kesalahan server saat menyelesaikan trip ambulans' });
+    }
+};
+
+// PUT /api/ambulance/logs/:id
+exports.updateLog = async (req, res) => {
+    const { id } = req.params;
+    const { km_start, km_end, departure_time, return_time } = req.body;
+
+    try {
+        const userId = req.user?.id || null;
+        const [logs] = await db.query('SELECT * FROM AmbulanceLogs WHERE id = ?', [id]);
+        if (logs.length === 0) {
+            return res.status(404).json({ message: 'Log ambulans tidak ditemukan' });
+        }
+        const current = logs[0];
+        
+        const newKmStart = km_start !== undefined ? km_start : current.km_start;
+        const newKmEnd = km_end !== undefined ? km_end : current.km_end;
+        const newDepartureTime = departure_time !== undefined ? (departure_time || null) : current.departure_time;
+        const newReturnTime = return_time !== undefined ? (return_time || null) : current.return_time;
+
+        await db.query(
+            'UPDATE AmbulanceLogs SET km_start = ?, km_end = ?, departure_time = ?, return_time = ?, updated_by = ? WHERE id = ?',
+            [newKmStart || 0, newKmEnd || 0, newDepartureTime, newReturnTime, userId, id]
+        );
+        clearCachePrefix('report:ambulance-usage');
+        res.json({ message: 'Log ambulans berhasil diupdate' });
+    } catch (error) {
+        console.error('updateLog error:', error);
+        res.status(500).json({ message: 'Terjadi kesalahan saat mengupdate log ambulans' });
     }
 };
 
