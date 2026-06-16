@@ -49,7 +49,7 @@ exports.getOccupancyStats = async (req, res) => {
 // Masih mendukung ?date=YYYY-MM-DD untuk kompatibilitas lama.
 // Laporan pasien masuk dan keluar per rentang tanggal (berdasarkan tanggal masuk/keluar).
 exports.getPatientInOut = async (req, res) => {
-    const { date, start_date, end_date, final_status, date_type, name } = req.query;
+    const { date, start_date, end_date, final_status, date_type, name, room_id, bed_id } = req.query;
     // Backward compatibility: jika hanya ada ?date lama, pakai sebagai from/to
     let from = start_date || date || '';
     let to = end_date || date || '';
@@ -57,7 +57,7 @@ exports.getPatientInOut = async (req, res) => {
     if (to && !from) from = to;
 
     try {
-        const cacheKey = `report:patient-in-out:${JSON.stringify({ from, to, final_status, date_type, name })}`;
+        const cacheKey = `report:patient-in-out:${JSON.stringify({ from, to, final_status, date_type, name, room_id, bed_id })}`;
         const cached = getCache(cacheKey);
         if (cached) {
             return res.json(cached);
@@ -90,6 +90,14 @@ exports.getPatientInOut = async (req, res) => {
         if (name) {
             whereClause += ' AND p.name LIKE ?';
             params.push(`%${name}%`);
+        }
+        if (room_id) {
+            whereClause += ' AND r.id = ?';
+            params.push(room_id);
+        }
+        if (bed_id) {
+            whereClause += ' AND b.id = ?';
+            params.push(bed_id);
         }
 
         const [rows] = await db.query(
@@ -707,13 +715,33 @@ exports.exportAmbulanceUsage = async (req, res) => {
 // Ringkasan untuk dashboard: jumlah pasien, ketersediaan kamar, status ambulans
 exports.getDashboardSummary = async (req, res) => {
     try {
+        const { startDate, endDate } = req.query;
+        let dateConditionP = "";
+        let dateConditionS = "";
+        let dateConditionPR = "";
+        const paramsP = [];
+        const paramsS = [];
+        const paramsPR = [];
+        
+        if (startDate && endDate) {
+            dateConditionP = " AND created_at >= ? AND created_at <= ?";
+            dateConditionS = " AND s.check_in_date >= ? AND s.check_in_date <= ?";
+            dateConditionPR = " AND created_at >= ? AND created_at <= ?";
+            const startStr = startDate + " 00:00:00";
+            const endStr = endDate + " 23:59:59";
+            paramsP.push(startStr, endStr);
+            paramsS.push(startStr, endStr);
+            paramsPR.push(startStr, endStr);
+        }
+
         // Pasien aktif (masih dirawat) & gender split
         const [activePatientsRows] = await db.query(
             `SELECT p.gender, COUNT(DISTINCT s.patient_id) as count
              FROM StayLogs s
              JOIN Patients p ON p.id = s.patient_id
-             WHERE s.final_status IS NULL
-             GROUP BY p.gender`
+             WHERE s.final_status IS NULL${dateConditionS}
+             GROUP BY p.gender`,
+             [...paramsS]
         );
         let active_patients = 0;
         const active_patients_gender = { 'Laki-laki': 0, 'Perempuan': 0 };
@@ -729,8 +757,9 @@ exports.getDashboardSummary = async (req, res) => {
             `SELECT p.gender, COUNT(DISTINCT s.patient_id) as count
              FROM StayLogs s
              JOIN Patients p ON p.id = s.patient_id
-             WHERE s.final_status IS NOT NULL
-             GROUP BY p.gender`
+             WHERE s.final_status IS NOT NULL${dateConditionS}
+             GROUP BY p.gender`,
+             [...paramsS]
         );
         let discharged_patients = 0;
         const discharged_patients_gender = { 'Laki-laki': 0, 'Perempuan': 0 };
@@ -743,16 +772,19 @@ exports.getDashboardSummary = async (req, res) => {
 
         // Total pasien terdaftar
         const [[{ total_patients }]] = await db.query(
-            "SELECT COUNT(*) AS total_patients FROM Patients"
+            `SELECT COUNT(*) AS total_patients FROM Patients WHERE 1=1${dateConditionP}`,
+            [...paramsP]
         );
         // Pasien pending verifikasi
         const [[{ pending_patients }]] = await db.query(
-            "SELECT COUNT(*) AS pending_patients FROM PatientRegistrations WHERE status_verification = 'Pending'"
+            `SELECT COUNT(*) AS pending_patients FROM PatientRegistrations WHERE status_verification = 'Pending'${dateConditionPR}`,
+            [...paramsPR]
         );
 
         // Distribusi Jenis Kelamin
         const [genderRows] = await db.query(
-            "SELECT gender, COUNT(*) AS count FROM Patients GROUP BY gender"
+            `SELECT gender, COUNT(*) AS count FROM Patients WHERE 1=1${dateConditionP} GROUP BY gender`,
+            [...paramsP]
         );
         const gender_distribution = { 'Laki-laki': 0, 'Perempuan': 0 };
         for (const row of genderRows) {
@@ -762,16 +794,38 @@ exports.getDashboardSummary = async (req, res) => {
 
         // Kategori Penyakit
         const [diseaseRows] = await db.query(
-            "SELECT disease_category, COUNT(*) AS count FROM Patients WHERE disease_category IS NOT NULL AND disease_category != '' GROUP BY disease_category ORDER BY count DESC"
+            `SELECT disease_category, COUNT(*) AS count FROM Patients WHERE disease_category IS NOT NULL AND disease_category != ''${dateConditionP} GROUP BY disease_category ORDER BY count DESC`,
+            [...paramsP]
         );
         const disease_categories = diseaseRows.map(row => ({ category: row.disease_category, count: Number(row.count) }));
 
         // Asal Kota (Kabupaten)
         const [cityRows] = await db.query(
-            "SELECT kabupaten, COUNT(*) AS count FROM Patients WHERE kabupaten IS NOT NULL AND kabupaten != '' GROUP BY kabupaten ORDER BY count DESC"
+            `SELECT kabupaten, COUNT(*) AS count FROM Patients WHERE kabupaten IS NOT NULL AND kabupaten != ''${dateConditionP} GROUP BY kabupaten ORDER BY count DESC`,
+            [...paramsP]
         );
         const patient_cities = cityRows.map(row => ({ city: row.kabupaten, count: Number(row.count) }));
 
+        // Golongan Usia
+        const [ageRows] = await db.query(
+            `SELECT age_category, COUNT(*) AS count FROM Patients WHERE age_category IS NOT NULL AND age_category != ''${dateConditionP} GROUP BY age_category ORDER BY count DESC`,
+            [...paramsP]
+        );
+        const age_categories = ageRows.map(row => ({ category: row.age_category, count: Number(row.count) }));
+
+        // Tingkat Pendidikan
+        const [eduRows] = await db.query(
+            `SELECT education, COUNT(*) AS count FROM Patients WHERE education IS NOT NULL AND education != ''${dateConditionP} GROUP BY education ORDER BY count DESC`,
+            [...paramsP]
+        );
+        const educations = eduRows.map(row => ({ level: row.education, count: Number(row.count) }));
+
+        // Pekerjaan (Jenis Pendidikan/Pekerjaan)
+        const [occRows] = await db.query(
+            `SELECT occupation, COUNT(*) AS count FROM Patients WHERE occupation IS NOT NULL AND occupation != ''${dateConditionP} GROUP BY occupation ORDER BY count DESC`,
+            [...paramsP]
+        );
+        const occupations = occRows.map(row => ({ type: row.occupation, count: Number(row.count) }));
         // Kamar: total beds & yang tersedia
         const [[{ total_beds }]] = await db.query(
             "SELECT COUNT(*) AS total_beds FROM Beds"
@@ -814,7 +868,10 @@ exports.getDashboardSummary = async (req, res) => {
                 pending: Number(pending_patients),
                 gender_distribution,
                 disease_categories,
-                cities: patient_cities
+                cities: patient_cities,
+                age_categories,
+                educations,
+                occupations
             },
             rooms: {
                 total_rooms: Number(total_rooms),
