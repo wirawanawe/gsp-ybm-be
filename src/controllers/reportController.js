@@ -799,12 +799,12 @@ exports.getDashboardSummary = async (req, res) => {
         );
         const disease_categories = diseaseRows.map(row => ({ category: row.disease_category, count: Number(row.count) }));
 
-        // Asal Kota (Kabupaten)
-        const [cityRows] = await db.query(
-            `SELECT kabupaten, COUNT(*) AS count FROM Patients WHERE kabupaten IS NOT NULL AND kabupaten != ''${dateConditionP} GROUP BY kabupaten ORDER BY count DESC`,
+        // Asal Wilayah (Provinsi)
+        const [provinsiRows] = await db.query(
+            `SELECT provinsi, COUNT(*) AS count FROM Patients WHERE provinsi IS NOT NULL AND provinsi != ''${dateConditionP} GROUP BY provinsi ORDER BY count DESC`,
             [...paramsP]
         );
-        const patient_cities = cityRows.map(row => ({ city: row.kabupaten, count: Number(row.count) }));
+        const patient_provinces = provinsiRows.map(row => ({ province: row.provinsi, count: Number(row.count) }));
 
         // Golongan Usia
         const [ageRows] = await db.query(
@@ -868,7 +868,7 @@ exports.getDashboardSummary = async (req, res) => {
                 pending: Number(pending_patients),
                 gender_distribution,
                 disease_categories,
-                cities: patient_cities,
+                provinces: patient_provinces,
                 age_categories,
                 educations,
                 occupations
