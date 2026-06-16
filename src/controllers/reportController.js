@@ -858,6 +858,49 @@ exports.getDashboardSummary = async (req, res) => {
             "SELECT COUNT(*) AS total_visitors FROM Visitors"
         );
 
+        // Penunggu by is_active and gender
+        const [visitorStatusRows] = await db.query(
+            "SELECT is_active, gender, COUNT(*) as count FROM Visitors GROUP BY is_active, gender"
+        );
+        let visitors_active_count = 0;
+        let visitors_inactive_count = 0;
+        const visitors_active_gender = { 'Laki-laki': 0, 'Perempuan': 0 };
+        const visitors_inactive_gender = { 'Laki-laki': 0, 'Perempuan': 0 };
+
+        for (const row of visitorStatusRows) {
+            const count = Number(row.count);
+            if (row.is_active) {
+                visitors_active_count += count;
+                if (row.gender === 'Laki-laki' || row.gender === 'Laki-Laki') visitors_active_gender['Laki-laki'] += count;
+                if (row.gender === 'Perempuan') visitors_active_gender['Perempuan'] += count;
+            } else {
+                visitors_inactive_count += count;
+                if (row.gender === 'Laki-laki' || row.gender === 'Laki-Laki') visitors_inactive_gender['Laki-laki'] += count;
+                if (row.gender === 'Perempuan') visitors_inactive_gender['Perempuan'] += count;
+            }
+        }
+
+        // Demographics Visitors
+        const [vProvinsiRows] = await db.query(
+            "SELECT provinsi, COUNT(*) AS count FROM Visitors WHERE provinsi IS NOT NULL AND provinsi != '' GROUP BY provinsi ORDER BY count DESC"
+        );
+        const visitor_provinces = vProvinsiRows.map(row => ({ province: row.provinsi, count: Number(row.count) }));
+
+        const [vAgeRows] = await db.query(
+            "SELECT age_category, COUNT(*) AS count FROM Visitors WHERE age_category IS NOT NULL AND age_category != '' GROUP BY age_category ORDER BY count DESC"
+        );
+        const visitor_age_categories = vAgeRows.map(row => ({ category: row.age_category, count: Number(row.count) }));
+
+        const [vEduRows] = await db.query(
+            "SELECT education, COUNT(*) AS count FROM Visitors WHERE education IS NOT NULL AND education != '' GROUP BY education ORDER BY count DESC"
+        );
+        const visitor_educations = vEduRows.map(row => ({ level: row.education, count: Number(row.count) }));
+
+        const [vOccRows] = await db.query(
+            "SELECT occupation, COUNT(*) AS count FROM Visitors WHERE occupation IS NOT NULL AND occupation != '' GROUP BY occupation ORDER BY count DESC"
+        );
+        const visitor_occupations = vOccRows.map(row => ({ type: row.occupation, count: Number(row.count) }));
+
         res.json({
             patients: {
                 active: Number(active_patients),
@@ -888,6 +931,14 @@ exports.getDashboardSummary = async (req, res) => {
             visitors: {
                 active: Number(active_visitors),
                 total: Number(total_visitors),
+                db_active: visitors_active_count,
+                db_inactive: visitors_inactive_count,
+                active_gender: visitors_active_gender,
+                inactive_gender: visitors_inactive_gender,
+                provinces: visitor_provinces,
+                age_categories: visitor_age_categories,
+                educations: visitor_educations,
+                occupations: visitor_occupations
             },
         });
     } catch (error) {
