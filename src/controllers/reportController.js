@@ -319,6 +319,7 @@ exports.exportPatientInOut = async (req, res) => {
             { header: 'Jenis Kelamin', key: 'v1_gender', width: 15 },
             { header: 'Tempat, Tanggal Lahir', key: 'v1_dob', width: 20 },
             { header: 'Usia (Tahun)', key: 'v1_age', width: 12 },
+            { header: 'Kategori Usia', key: 'v1_age_category', width: 15 },
             { header: 'Alamat Lengkap', key: 'v1_address', width: 30 },
             { header: 'RT/RW', key: 'v1_rtrw', width: 10 },
             { header: 'Kelurahan/Desa', key: 'v1_kelurahan', width: 18 },
@@ -336,6 +337,7 @@ exports.exportPatientInOut = async (req, res) => {
             { header: 'Jenis Kelamin', key: 'v2_gender', width: 15 },
             { header: 'Tempat, Tanggal Lahir', key: 'v2_dob', width: 20 },
             { header: 'Usia (Tahun)', key: 'v2_age', width: 12 },
+            { header: 'Kategori Usia', key: 'v2_age_category', width: 15 },
             { header: 'Alamat Lengkap', key: 'v2_address', width: 30 },
             { header: 'RT/RW', key: 'v2_rtrw', width: 10 },
             { header: 'Kelurahan/Desa', key: 'v2_kelurahan', width: 18 },
@@ -369,24 +371,24 @@ exports.exportPatientInOut = async (req, res) => {
         groupHeaderRow.getCell(1).font = { bold: true, color: { argb: 'FF000000' } };
 
         groupHeaderRow.getCell(22).value = 'PENDAMPING 1';
-        sheet.mergeCells(1, 22, 1, 36);
+        sheet.mergeCells(1, 22, 1, 37);
         groupHeaderRow.getCell(22).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
         groupHeaderRow.getCell(22).font = { bold: true, color: { argb: 'FF000000' } };
 
-        groupHeaderRow.getCell(37).value = 'PENDAMPING 2';
-        sheet.mergeCells(1, 37, 1, 51);
-        groupHeaderRow.getCell(37).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
-        groupHeaderRow.getCell(37).font = { bold: true, color: { argb: 'FF000000' } };
+        groupHeaderRow.getCell(38).value = 'PENDAMPING 2';
+        sheet.mergeCells(1, 38, 1, 53);
+        groupHeaderRow.getCell(38).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+        groupHeaderRow.getCell(38).font = { bold: true, color: { argb: 'FF000000' } };
 
-        groupHeaderRow.getCell(52).value = 'RUMAH SINGGAH';
-        sheet.mergeCells(1, 52, 1, 58);
-        groupHeaderRow.getCell(52).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
-        groupHeaderRow.getCell(52).font = { bold: true, color: { argb: 'FF000000' } };
+        groupHeaderRow.getCell(54).value = 'RUMAH SINGGAH';
+        sheet.mergeCells(1, 54, 1, 60);
+        groupHeaderRow.getCell(54).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
+        groupHeaderRow.getCell(54).font = { bold: true, color: { argb: 'FF000000' } };
 
-        groupHeaderRow.getCell(59).value = 'FASILITAS';
-        sheet.mergeCells(1, 59, 1, 60);
-        groupHeaderRow.getCell(59).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
-        groupHeaderRow.getCell(59).font = { bold: true, color: { argb: 'FF000000' } };
+        groupHeaderRow.getCell(61).value = 'FASILITAS';
+        sheet.mergeCells(1, 61, 1, 62);
+        groupHeaderRow.getCell(61).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
+        groupHeaderRow.getCell(61).font = { bold: true, color: { argb: 'FF000000' } };
 
         groupHeaderRow.height = 25;
         groupHeaderRow.eachCell((cell) => {
@@ -473,6 +475,7 @@ exports.exportPatientInOut = async (req, res) => {
                 v1_gender: v1.gender || '-',
                 v1_dob: v1.dob ? new Date(v1.dob).toLocaleDateString('id-ID') : '-',
                 v1_age: getAge(v1.dob),
+                v1_age_category: v1.age_category || '-',
                 v1_address: v1.address || '-',
                 v1_rtrw: v1.rt_rw || '-',
                 v1_kelurahan: v1.kelurahan || '-',
@@ -483,7 +486,7 @@ exports.exportPatientInOut = async (req, res) => {
                 v1_education: v1.education || '-',
                 v1_occupation: v1.occupation || '-'
             } : {
-                v1_nik: '-', v1_name: '-', v1_relation: '-', v1_gender: '-', v1_dob: '-', v1_age: '-',
+                v1_nik: '-', v1_name: '-', v1_relation: '-', v1_gender: '-', v1_dob: '-', v1_age: '-', v1_age_category: '-',
                 v1_address: '-', v1_rtrw: '-', v1_kelurahan: '-', v1_kecamatan: '-', v1_kabupaten: '-', 
                 v1_provinsi: '-', v1_phone: '-', v1_education: '-', v1_occupation: '-'
             };
@@ -495,6 +498,7 @@ exports.exportPatientInOut = async (req, res) => {
                 v2_gender: v2.gender || '-',
                 v2_dob: v2.dob ? new Date(v2.dob).toLocaleDateString('id-ID') : '-',
                 v2_age: getAge(v2.dob),
+                v2_age_category: v2.age_category || '-',
                 v2_address: v2.address || '-',
                 v2_rtrw: v2.rt_rw || '-',
                 v2_kelurahan: v2.kelurahan || '-',
@@ -505,7 +509,7 @@ exports.exportPatientInOut = async (req, res) => {
                 v2_education: v2.education || '-',
                 v2_occupation: v2.occupation || '-'
             } : {
-                v2_nik: '-', v2_name: '-', v2_relation: '-', v2_gender: '-', v2_dob: '-', v2_age: '-',
+                v2_nik: '-', v2_name: '-', v2_relation: '-', v2_gender: '-', v2_dob: '-', v2_age: '-', v2_age_category: '-',
                 v2_address: '-', v2_rtrw: '-', v2_kelurahan: '-', v2_kecamatan: '-', v2_kabupaten: '-', 
                 v2_provinsi: '-', v2_phone: '-', v2_education: '-', v2_occupation: '-'
             };
@@ -624,6 +628,7 @@ exports.exportAmbulanceUsage = async (req, res) => {
             { header: 'Kendaraan', key: 'vehicle_model', width: 18 },
             { header: 'Driver', key: 'driver', width: 15 },
             { header: 'Tujuan', key: 'destination', width: 30 },
+            { header: 'Jumlah Pasien', key: 'patient_count', width: 15 },
             { header: 'Nama Pasien', key: 'patient_name', width: 25 },
             { header: 'No Registrasi', key: 'registration_number', width: 22 },
             { header: 'Kondisi BBM (Berangkat)', key: 'fuel_cond', width: 18 },
@@ -641,13 +646,15 @@ exports.exportAmbulanceUsage = async (req, res) => {
             const regList = row.patients?.map(p => p.registration_number || '-').join('\n') || row.registration_number || '-';
             const destList = row.patients?.map(p => row.patients.length > 1 ? `${p.destination || row.destination || '-'} (${p.patient_name})` : (p.destination || row.destination || '-')).join('\n') || row.destination || '-';
             const docsList = row.patients?.map(p => p.document_path ? 'Ada' : 'Tidak Ada').join('\n') || '-';
+            const patientCount = row.patients ? row.patients.length : 0;
             
             sheet.addRow({
                 no: index + 1,
-                plate_number: row.plate_number,
-                vehicle_model: row.vehicle_model,
+                plate_number: row.plate_number || '-',
+                vehicle_model: row.vehicle_model || '-',
                 driver: row.driver_name || '-',
                 destination: destList,
+                patient_count: patientCount,
                 patient_name: patientsList,
                 registration_number: regList,
                 fuel_cond: row.fuel_condition || '-',

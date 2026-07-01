@@ -385,7 +385,7 @@ exports.checkIn = async (req, res) => {
 // Mengupdate data check-in (seperti tanggal masuk atau pasien) pada stay log yang masih aktif
 exports.updateStayLog = async (req, res) => {
     const { id } = req.params;
-    const { check_in_date, check_out_date, final_status, patient_id, visitor_id } = req.body;
+    const { check_in_date, check_out_date, final_status, patient_id, visitor_id, bed_id } = req.body;
     
     try {
         const [stays] = await db.query('SELECT * FROM StayLogs WHERE id = ?', [id]);
@@ -410,6 +410,35 @@ exports.updateStayLog = async (req, res) => {
                 [newCheckInDate, newCheckOutDate, newFinalStatus, newPatientId, userId, id]
             );
             
+            // Reverting checkout to active
+            const wasCompleted = current.final_status !== null && current.final_status !== '';
+            const isNowActive = newFinalStatus === null || newFinalStatus === '';
+            const newBedId = bed_id || current.bed_id;
+            
+            if (wasCompleted && isNowActive) {
+                // 1. Check if bed is available
+                const [bedCheck] = await connection.query('SELECT is_available FROM Beds WHERE id = ?', [newBedId]);
+                if (bedCheck.length > 0 && !bedCheck[0].is_available) {
+                    await connection.rollback();
+                    connection.release();
+                    return res.status(400).json({ message: 'Bed sudah ditempati oleh pasien lain. Tidak bisa mengembalikan status.' });
+                }
+                
+                // 2. Mark Bed as Unavailable
+                await connection.query('UPDATE Beds SET is_available = FALSE, updated_by = ? WHERE id = ?', [userId, newBedId]);
+                
+                // If bed changed, update StayLogs
+                if (String(newBedId) !== String(current.bed_id)) {
+                    await connection.query('UPDATE StayLogs SET bed_id = ? WHERE id = ?', [newBedId, id]);
+                }
+                
+                // 3. Reactivate Visitors
+                await connection.query('UPDATE Visitors SET is_active = TRUE, updated_by = ? WHERE patient_id = ?', [userId, current.patient_id]);
+                
+                // 4. Update PatientRegistration status
+                await connection.query("UPDATE PatientRegistrations SET status_rumah_singgah = 'Dirawat', updated_by = ? WHERE patient_id = ?", [userId, current.patient_id]);
+            }
+
             // If patient changed, we might need to update the PatientRegistrations status
             if (String(newPatientId) !== String(current.patient_id)) {
                 // Update old patient
