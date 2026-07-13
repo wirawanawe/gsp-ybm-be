@@ -1,15 +1,16 @@
-const mysql = require('mysql2/promise');
-require('dotenv').config();
+const db = require('./src/config/db');
 
-async function check() {
-  const conn = await mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME
-  });
-  const [rows] = await conn.query("SHOW COLUMNS FROM StayLogs WHERE Field = 'final_status'");
-  console.log(rows);
-  await conn.end();
+async function main() {
+    try {
+        const [columns] = await db.query(`SHOW COLUMNS FROM PatientRegistrations LIKE 'status_verification'`);
+        if (columns.length > 0) {
+            console.log('status_verification type:', columns[0].Type);
+        }
+    } catch (e) {
+        console.error('Error:', e);
+    } finally {
+        process.exit();
+    }
 }
-check();
+
+main();

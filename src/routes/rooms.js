@@ -29,7 +29,7 @@ router.post('/check-in', roomController.checkIn);
 router.post('/transfer', roomController.transfer);
 router.put('/check-out', uploadDeparture.single('departure_photo'), roomController.checkOut);
 router.post('/stay/:stayId/visitors', roomController.addStayVisitor);
-router.put('/stay/:id', roomController.updateStayLog);
+router.put('/stay/:id', uploadDeparture.single('departure_photo'), roomController.updateStayLog);
 
 // Room routes
 router.get('/', roomController.getRooms);

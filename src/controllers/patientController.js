@@ -454,16 +454,16 @@ exports.deletePatient = async (req, res) => {
 // PUT /api/patients/:id/verify
 // Update status_verification di SEMUA baris PatientRegistrations untuk pasien ini.
 exports.verifyPatient = async (req, res) => {
-    const { status_verification } = req.body;
-    const allowed = ['Layak Mustahik', 'Rujukan Lain'];
+    const { status_verification, cancellation_reason } = req.body;
+    const allowed = ['Layak Mustahik', 'Rujukan Lain', 'Batal'];
     if (!status_verification || !allowed.includes(status_verification)) {
-        return res.status(400).json({ message: 'status_verification harus Layak Mustahik atau Rujukan Lain' });
+        return res.status(400).json({ message: 'status_verification harus Layak Mustahik, Rujukan Lain, atau Batal' });
     }
 
     try {
         const [result] = await db.query(
-            'UPDATE PatientRegistrations SET status_verification = ?, updated_by = ? WHERE patient_id = ?',
-            [status_verification, req.user?.id || null, req.params.id]
+            'UPDATE PatientRegistrations SET status_verification = ?, cancellation_reason = ?, updated_by = ? WHERE patient_id = ?',
+            [status_verification, cancellation_reason || null, req.user?.id || null, req.params.id]
         );
 
         if (result.affectedRows === 0) {

@@ -399,6 +399,7 @@ exports.updateStayLog = async (req, res) => {
         const newFinalStatus = final_status !== undefined ? (final_status || null) : current.final_status;
         const newPatientId = patient_id || current.patient_id;
         const userId = req.user?.id || null;
+        const photoPath = req.file ? `departure/${req.file.filename}` : current.departure_photo_path;
 
         const connection = await db.getConnection();
         await connection.beginTransaction();
@@ -406,8 +407,8 @@ exports.updateStayLog = async (req, res) => {
         try {
             // Update the StayLog
             await connection.query(
-                'UPDATE StayLogs SET check_in_date = ?, check_out_date = ?, final_status = ?, patient_id = ?, updated_by = ? WHERE id = ?',
-                [newCheckInDate, newCheckOutDate, newFinalStatus, newPatientId, userId, id]
+                'UPDATE StayLogs SET check_in_date = ?, check_out_date = ?, final_status = ?, departure_photo_path = ?, patient_id = ?, updated_by = ? WHERE id = ?',
+                [newCheckInDate, newCheckOutDate, newFinalStatus, photoPath, newPatientId, userId, id]
             );
             
             // Reverting checkout to active
