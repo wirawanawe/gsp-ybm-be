@@ -348,6 +348,25 @@ exports.checkIn = async (req, res) => {
                 [userId, patient_id]
             );
 
+            // 2c. Jika pasien yang check-in pernah tercatat sebagai penunggu aktif, nonaktifkan status penunggu aktifnya
+            await connection.query(
+                `UPDATE Visitors v
+                 JOIN Patients p ON p.id = ?
+                 SET v.is_active = FALSE
+                 WHERE v.nik = p.nik AND v.is_active = TRUE`,
+                [patient_id]
+            );
+
+            // 2d. Jika pasien yang check-in pernah tercatat dalam StayLogVisitors yang masih aktif, keluarkan dari stay log tersebut
+            await connection.query(
+                `DELETE slv FROM StayLogVisitors slv
+                 JOIN StayLogs sl ON slv.stay_log_id = sl.id AND sl.final_status IS NULL
+                 JOIN Visitors v ON slv.visitor_id = v.id
+                 JOIN Patients p ON p.id = ?
+                 WHERE v.nik = p.nik`,
+                [patient_id]
+            );
+
             // 3. Simpan penunggu ke StayLogVisitors (visitor_id atau visitor_ids)
             const vIds = [];
             if (visitor_id) vIds.push(Number(visitor_id));

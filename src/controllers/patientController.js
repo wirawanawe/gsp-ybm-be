@@ -18,7 +18,7 @@ exports.getPendingCount = async (req, res) => {
 };
 
 // GET /api/patients/by-nik?nik=1234567890123456
-// Ambil data pasien berdasarkan NIK (untuk pre-fill form pendaftaran ulang)
+// Ambil data pasien berdasarkan NIK (untuk pre-fill form pendaftaran ulang / konversi penunggu ke pasien)
 // Hanya pasien yang sudah checkout/pulang atau ditolak yang bisa mendaftar ulang
 exports.getPatientByNik = async (req, res) => {
     const { nik } = req.query;
@@ -39,10 +39,33 @@ exports.getPatientByNik = async (req, res) => {
             [nik.trim()]
         );
         if (rows.length === 0) {
-            return res.json(null);
+            // Cek apakah NIK terdaftar di tabel Visitors (penunggu yang ingin mendaftar sebagai pasien)
+            const [vRows] = await db.query(
+                `SELECT v.id AS visitor_id, v.name, v.nik, v.dob, v.gender, v.address, v.phone,
+                        v.rt_rw, v.kelurahan, v.kecamatan, v.kabupaten, v.provinsi,
+                        v.occupation, v.income, v.age, v.age_category, v.education,
+                        v.ktp_path, v.kk_path, v.is_active, v.patient_id AS accompanied_patient_id,
+                        p.name AS accompanied_patient_name
+                 FROM Visitors v
+                 LEFT JOIN Patients p ON v.patient_id = p.id
+                 WHERE v.nik = ?
+                 ORDER BY v.id DESC LIMIT 1`,
+                [nik.trim()]
+            );
+            if (vRows.length === 0) {
+                return res.json(null);
+            }
+            const visitor = vRows[0];
+            return res.json({
+                ...visitor,
+                id: null,
+                is_from_visitor: true,
+                can_re_register: true,
+                can_re_register_reason: `Data ditemukan dari riwayat penunggu${visitor.accompanied_patient_name ? ' (mendampingi ' + visitor.accompanied_patient_name + ')' : ''}. Data demografi telah diisi otomatis. Silakan lengkapi diagnosis dan data medis pasien.`
+            });
         }
         const patient = rows[0];
-        const ditolak = (patient.status_verification || '') === 'Rujukan Lain';
+        const ditolak = (patient.status_verification || '') === 'Rujukan Lain' || (patient.status_verification || '') === 'Tidak Layak' || (patient.status_verification || '') === 'Batal';
         const sudahPulang = !!patient.sudah_pulang;
         const tidakPunyaRegistrasi = (patient.jumlah_registrasi || 0) === 0;
         const canReRegister = tidakPunyaRegistrasi || ditolak || sudahPulang;
@@ -210,44 +233,40 @@ exports.registerPatient = async (req, res) => {
 
     try {
         const nikTrim = String(nik).trim();
-        const phoneTrim = String(phone || '').trim();
-        // NIK dan no. telepon tidak boleh sama (di tabel Pasien maupun Penunggu)
+        // NIK tidak boleh sama dengan pasien lain yang sudah terdaftar
         const [existingP] = await db.query(
-            'SELECT id, nik, phone FROM Patients WHERE nik = ? OR phone = ?',
-            [nikTrim, phoneTrim]
+            'SELECT id, nik FROM Patients WHERE nik = ?',
+            [nikTrim]
         );
         if (existingP.length > 0) {
-            if (existingP.some((r) => String(r.nik) === nikTrim)) {
-                return res.status(400).json({ message: 'No. KTP (NIK) sudah terdaftar. Jika ini pasien yang sama, gunakan pendaftaran ulang.' });
-            }
-            return res.status(400).json({ message: 'No. telepon sudah terdaftar.' });
-        }
-        const [existingV] = await db.query(
-            'SELECT id FROM Visitors WHERE nik = ? OR (phone IS NOT NULL AND phone = ?)',
-            [nikTrim, phoneTrim]
-        );
-        if (existingV.length > 0) {
-            return res.status(400).json({ message: 'No. KTP atau No. telepon sudah terdaftar sebagai penunggu.' });
+            return res.status(400).json({ message: 'No. KTP (NIK) sudah terdaftar. Jika ini pasien yang sama, gunakan pendaftaran ulang.' });
         }
 
         const connection = await db.getConnection();
         await connection.beginTransaction();
 
         try {
-            // Generate registration number: REG-YBM-YYYYMMDDHHMMSS
-            const regNum = `REG-YBM-${new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14)}`;
+            // Generate registration number: REG-YBM-YYYYMMDDHHMMSS-XXX
+            const datePart = new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14);
+            const randomPart = Math.floor(100 + Math.random() * 900);
+            const regNum = `REG-YBM-${datePart}-${randomPart}`;
 
             // 1. Insert ke tabel Patients (tanpa status - ada di PatientRegistrations)
             const userId = req.user?.id || null;
+            const cleanDob = (dob && String(dob).trim() !== '') ? String(dob).trim() : null;
+            const cleanAge = (age !== undefined && age !== '' && !isNaN(Number(age))) ? Number(age) : null;
+            const cleanPhone = (phone && String(phone).trim() !== '') ? String(phone).trim() : null;
+            const cleanAddress = (address && String(address).trim() !== '') ? String(address).trim() : null;
+
             const [patientResult] = await connection.query(
                 `INSERT INTO Patients (registration_number, name, nik, dob, gender, address, phone,
                  rt_rw, kelurahan, kecamatan, kabupaten, provinsi, diagnosis, treatment_plan, occupation, income, 
                  age, age_category, education, disease_category, rs_rujukan, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [regNum, name, nik, dob, gender, address, phone,
+                [regNum, name, nikTrim, cleanDob, gender || 'Laki-laki', cleanAddress, cleanPhone,
                     rt_rw || null, kelurahan || null, kecamatan || null, kabupaten || null, provinsi || null,
                     diagnosis || null, treatment_plan || null, occupation || null, income || null, 
-                    age || null, age_category || null, education || null, disease_category || null, rs_rujukan || null, userId]
+                    cleanAge, age_category || null, education || null, disease_category || null, rs_rujukan || null, userId]
             );
 
             const patientId = patientResult.insertId;
@@ -260,17 +279,42 @@ exports.registerPatient = async (req, res) => {
             );
 
             // 3. Insert ke tabel Documents (jika ada file yang diunggah)
+            const uploadedTypes = new Set();
             if (req.files) {
                 const docTypes = Object.keys(req.files);
                 for (const type of docTypes) {
-                    const file = req.files[type][0];
-                    // Determine logical document_type enum value
-                    let docEnum = type.toUpperCase();
+                    if (req.files[type] && req.files[type][0]) {
+                        const file = req.files[type][0];
+                        let docEnum = type.toUpperCase();
+                        uploadedTypes.add(docEnum);
 
-                    await connection.query(
-                        `INSERT INTO Documents (patient_id, document_type, file_path, created_by) VALUES (?, ?, ?, ?)`,
-                        [patientId, docEnum, file.path, userId]
-                    );
+                        await connection.query(
+                            `INSERT INTO Documents (patient_id, document_type, file_path, created_by) VALUES (?, ?, ?, ?)`,
+                            [patientId, docEnum, file.path, userId]
+                        );
+                    }
+                }
+            }
+
+            // 4. Jika KTP atau KK tidak diunggah, coba reuse dari riwayat penunggu jika sebelumnya terdaftar sebagai penunggu
+            if (!uploadedTypes.has('KTP') || !uploadedTypes.has('KK')) {
+                const [prevV] = await connection.query(
+                    'SELECT ktp_path, kk_path FROM Visitors WHERE nik = ? AND (ktp_path IS NOT NULL OR kk_path IS NOT NULL) ORDER BY id DESC LIMIT 1',
+                    [nikTrim]
+                );
+                if (prevV.length > 0) {
+                    if (!uploadedTypes.has('KTP') && prevV[0].ktp_path) {
+                        await connection.query(
+                            `INSERT INTO Documents (patient_id, document_type, file_path, created_by) VALUES (?, 'KTP', ?, ?)`,
+                            [patientId, prevV[0].ktp_path, userId]
+                        );
+                    }
+                    if (!uploadedTypes.has('KK') && prevV[0].kk_path) {
+                        await connection.query(
+                            `INSERT INTO Documents (patient_id, document_type, file_path, created_by) VALUES (?, 'KK', ?, ?)`,
+                            [patientId, prevV[0].kk_path, userId]
+                        );
+                    }
                 }
             }
 
@@ -314,7 +358,9 @@ exports.reRegister = async (req, res) => {
             return res.status(404).json({ message: 'Pasien tidak ditemukan' });
         }
 
-        const regNum = `REG-YBM-${new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14)}`;
+        const datePart = new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14);
+        const randomPart = Math.floor(100 + Math.random() * 900);
+        const regNum = `REG-YBM-${datePart}-${randomPart}`;
 
         // Setiap pendaftaran ulang: status verifikasi di-reset (Pending), status_rumah_singgah selalu Menunggu (episode baru)
         const userId = req.user?.id || null;
@@ -375,30 +421,15 @@ exports.updatePatient = async (req, res) => {
         return res.status(400).json({ message: 'NIK harus tepat 16 digit angka sesuai KTP' });
     }
 
-    // Jika NIK atau no. telepon diubah, tidak boleh sama dengan data lain (pasien lain atau penunggu)
-    if (nik !== undefined || phone !== undefined) {
-        const [current] = await db.query('SELECT nik, phone FROM Patients WHERE id = ?', [id]);
-        if (current.length > 0) {
-            const checkNik = nik !== undefined ? String(nik).trim() : current[0].nik;
-            const checkPhone = phone !== undefined ? String(phone || '').trim() : (current[0].phone || '');
-            const [dupP] = await db.query(
-                'SELECT id FROM Patients WHERE id != ? AND (nik = ? OR phone = ?)',
-                [id, checkNik, checkPhone]
-            );
-            if (dupP.length > 0) {
-                const [byNik] = await db.query('SELECT id FROM Patients WHERE id != ? AND nik = ?', [id, checkNik]);
-                if (byNik.length > 0) {
-                    return res.status(400).json({ message: 'No. KTP (NIK) sudah terdaftar untuk pasien lain.' });
-                }
-                return res.status(400).json({ message: 'No. telepon sudah terdaftar untuk pasien lain.' });
-            }
-            const [dupV] = await db.query(
-                'SELECT id FROM Visitors WHERE nik = ? OR (phone IS NOT NULL AND phone = ?)',
-                [checkNik, checkPhone]
-            );
-            if (dupV.length > 0) {
-                return res.status(400).json({ message: 'No. KTP atau No. telepon sudah terdaftar sebagai penunggu.' });
-            }
+    // Jika NIK diubah, tidak boleh sama dengan pasien lain
+    if (nik !== undefined) {
+        const checkNik = String(nik).trim();
+        const [dupP] = await db.query(
+            'SELECT id FROM Patients WHERE id != ? AND nik = ?',
+            [id, checkNik]
+        );
+        if (dupP.length > 0) {
+            return res.status(400).json({ message: 'No. KTP (NIK) sudah terdaftar untuk pasien lain.' });
         }
     }
 
